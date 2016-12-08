@@ -2,7 +2,7 @@
 
 RNAkira (RNA Kinetic Rate Analysis) is a tool to estimate synthesis, degradation, processing and translation rates 
 using data from high-throughput sequencing of 4sU-labeled RNA (4sU-seq) and ribosome protected fragments (RPFs from Ribo-seq). 
-It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://dx.doi.org/10.1093/bioinformatics/btv288), but key differences are the inclusion of flowthrough for normalization, ribo-seq data for translation rate estimates, and the assumption of steady-state kinetics.
+It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://bioinformatics.oxfordjournals.org/content/31/17/2829), but key differences are the inclusion of flowthrough for normalization, ribo-seq data for translation rate estimates, and the assumption of steady-state kinetics.
 
 ## Prerequisites
 RNAkira runs on Python 2.7 and requires numpy, scipy, statsmodels and pandas (+ twobitreader if prepare_annotation.py is used). Read counts for exonic and intronic regions are expected in [featureCounts](http://bioinf.wehi.edu.au/featureCounts/) output format, but normalized TPM values can be supplied as well.
