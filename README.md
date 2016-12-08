@@ -2,7 +2,7 @@
 
 RNAkira (RNA Kinetic Rate Analysis) is a tool to estimate synthesis, degradation, processing and translation rates 
 using data from high-throughput sequencing of 4sU-labeled RNA (4sU-seq) and ribosome protected fragments (RPFs from Ribo-seq). 
-While it is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://dx.doi.org/10.1093/bioinformatics/btv288), key differences are the inclusion of flowthrough data for normalization and the assumption of steady-state kinetics.
+It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://dx.doi.org/10.1093/bioinformatics/btv288), but key differences are the inclusion of flowthrough for normalization, ribo-seq data for translation rate estimates, and the assumption of steady-state kinetics.
 
 ## Prerequisites
 RNAkira runs on Python 2.7 and requires numpy, scipy, statsmodels and pandas (+ twobitreader if prepare_annotation.py is used). Read counts for exonic and intronic regions are expected in [featureCounts](http://bioinf.wehi.edu.au/featureCounts/) output format, but normalized TPM values can be supplied as well.
@@ -59,35 +59,4 @@ python RNAkira.py
 ## Output
 * TPM.csv -- a csv file with raw TPM values for each fraction and each sample
 * corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 
-* RNAkira_output.csv -- a csv file with fit results and the following columns
-  * gene_id
-  * initial_synthesis_t1 -- synthesis rate from initial fit
-  * initial_synthesis_err_t1 -- with associated error
-  * ... for each time point
-  * initial_degradation_t1 -- degradation rate
-  * ... + error for each time point
-  * initial_processing_t1 -- processing rate
-  * ... + error for each time point
-  * initial_translation_t1 -- translation rate
-  * ... + error for each time point
-  * initial_logL -- log likelihood of initial fit
-  * initial_fit_success -- status of minimization routine
-  * initial_pval -- chi-squared p-value comparing initial fit to best model
-  * initial_qval -- BH-corrected p-value
-  * modeled_synthesis_t1 -- synthesis rate from best model
-  * ... + error for each time point 
-  * modeled_degradation_t1
-  * ... + error for each time point
-  * modeled_processing_t1 
-  * ... + error for each time point
-  * modeled_translation_t1 
-  * ... + error for each time point
-  * synthesis_log2FC -- log2 fold change of synthesis in best model
-  * synthesis_log2FC_err -- and estimated error
-  * degradation_log2FC -- log2FC of degradation rate + error
-  * processing_log2FC -- log2FC of processing rate + error
-  * translation_log2FC -- log2FC of translation rate + error
-  * modeled_logL -- log likelihood of best model
-  * modeled_fit_success -- status of minimization routine
-  * modeled_pval -- chi-squared p-value comparing best model to next-best model
-  * modeled_qval -- BH-corrected p-value
+* RNAkira_output.csv -- a csv file with fit results for each gene: synthesis, degradation, processing and translation rates (+ error estimates) for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates + errors for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model
