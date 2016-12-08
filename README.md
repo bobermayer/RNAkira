@@ -22,9 +22,10 @@ prepare_annotation.py -i annotation.gtf.gz -o annotation_with_introns.gtf -s gen
 ### 2. run featureCounts on your data
 RNAkira assumes that you have 4 datasets for pre-existing (flowthrough), newly synthesized (elu), unlabeled RNA (unlabeled), and ribosome protected fragments (ribo) for each timepoint. The associated bam files will be quantified over exonic and intronic regions one fraction at a time:
 ```
-featureCounts -t exon -g gene_id -a annotation_with_introns.gtf -o elu_counts_exons.txt elu_bam_t1_rep1.bam elu_bam_t1_rep2.bam elu_bam_t2_rep1.bam elu_bam_t2_rep2.bam
+featureCounts -t exon -g gene_id -a annotation_with_introns.gtf -o elu_counts_exons.txt elu_bam_t1_rep1.bam elu_bam_t1_rep2.bam elu_bam_t2_rep1.bam elu_bam_t2_rep2.bam ...
 ```
 and similar for the flowthrough, unlabeled and ribo fractions (use ``-t intron`` for intronic reads and ``-t CDS`` for ribo-seq data; use ``-s`` and ``-p`` appropriately if you have stranded or paired-end data). 
+
 **Note**: use the same ordering of bam files for all fractions!
 
 ### 3. run RNAkira
