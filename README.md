@@ -34,7 +34,7 @@ assuming a labeling time T (which should be much smaller than the difference bet
 python RNAkira.py 
     -T T 
     -t t1,t1,t2,t2,t3,t3 
-    -o RNAkira_output.csv 
+    -o out_prefix
     -g gene_stats.csv 
     -e elu_counts_introns.txt 
     -E elu_counts_exons.txt 
@@ -51,11 +51,11 @@ Alternatively, if you have TPM values corrected for 4sU incorporation bias and w
 python RNAkira.py 
     -T T 
     -t t1,t1,t2,t2,t3,t3 
-    -o RNAkira_output.csv 
+    -o out_prefix
     -i corrected_TPM.csv 
 ```
 
 ## Output
-* TPM.csv -- a csv file with raw TPM values for each fraction and each sample
-* corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 
-* RNAkira_output.csv -- a csv file with fit results for each gene: synthesis, degradation, processing and translation rates (+ error estimates) for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates + errors for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model
+* out_prefix_TPM.csv -- a csv file with raw TPM values for each fraction and each sample
+* out_prefix_corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 
+* out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing and translation rates (+ error estimates) for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates + errors for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model
