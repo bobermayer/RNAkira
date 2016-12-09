@@ -35,7 +35,6 @@ python RNAkira.py
     -T T 
     -t t1,t1,t2,t2,t3,t3 
     -o RNAkira_output.csv 
-    -a 0.05
     -g gene_stats.csv 
     -e elu_counts_introns.txt 
     -E elu_counts_exons.txt 
@@ -52,7 +51,6 @@ Alternatively, if you have TPM values corrected for 4sU incorporation bias and w
 python RNAkira.py 
     -T T 
     -t t1,t1,t2,t2,t3,t3 
-    -a 0.05
     -o RNAkira_output.csv 
     -i corrected_TPM.csv 
 ```
