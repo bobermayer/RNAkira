@@ -71,8 +71,8 @@ def write_gene_lines (lines, outf):
 		elif ls[2]=='UTR':
 			# remember UTR lines but do not print yet
 			UTR_lines.append((int(ls[3]),int(ls[4]),ls[6],line))
-		else:
-			# print everything else
+		else: #if not "retained_intron" in ls[8]:
+			# print everything else (except retained introns?)
 			outf.write(line)
 
 	if len(exon_lines)==0:
@@ -156,90 +156,92 @@ def write_gene_lines (lines, outf):
 					  UTR5_length=UTR5_length))
 	
 
-parser=OptionParser()
-parser.add_option('-i','--infile',dest='infile',help="input GTF (default: stdin), should be sorted so that all lines for one gene are together")
-parser.add_option('-o','--outfile',dest='outfile',help="output GTF (default: stdout)")
-parser.add_option('-s','--stats',dest='stats',help="if given, write gene stats to here")
-parser.add_option('-g','--genome',dest='genome',help="genome in 2bit format")
+if __name__ == '__main__':
 
-options,args=parser.parse_args()
+	parser=OptionParser()
+	parser.add_option('-i','--infile',dest='infile',help="input GTF (default: stdin), should be sorted so that all lines for one gene are together")
+	parser.add_option('-o','--outfile',dest='outfile',help="output GTF (default: stdout)")
+	parser.add_option('-s','--stats',dest='stats',help="if given, write gene stats to here")
+	parser.add_option('-g','--genome',dest='genome',help="genome in 2bit format")
 
-if options.infile is None:
-	print >> sys.stderr, 'reading from stdin'
-	inf=sys.stdin
-else:
-	print >> sys.stderr, 'reading from '+options.infile
-	if options.infile.endswith('.gz'):
-		inf=gzip.open(options.infile)
+	options,args=parser.parse_args()
+
+	if options.infile is None:
+		print >> sys.stderr, 'reading from stdin'
+		inf=sys.stdin
 	else:
-		inf=open(options.infile)
+		print >> sys.stderr, 'reading from '+options.infile
+		if options.infile.endswith('.gz'):
+			inf=gzip.open(options.infile)
+		else:
+			inf=open(options.infile)
 
-if options.outfile is None:
-	print >> sys.stderr, 'writing to '+options.outfile
-	outf=sys.stdout
-else:
-	print >> sys.stderr, 'writing to '+options.outfile
-	if options.outfile.endswith('.gz'):
-		outf=gzip.open(options.outfile,'wb')
+	if options.outfile is None:
+		print >> sys.stderr, 'writing to '+options.outfile
+		outf=sys.stdout
 	else:
-		outf=open(options.outfile,'w')
+		print >> sys.stderr, 'writing to '+options.outfile
+		if options.outfile.endswith('.gz'):
+			outf=gzip.open(options.outfile,'wb')
+		else:
+			outf=open(options.outfile,'w')
 
-try:
-	genome=TwoBitFile(options.genome)
-except:
-	raise Exception("could not open genome file "+options.genome)
+	try:
+		genome=TwoBitFile(options.genome)
+	except:
+		raise Exception("could not open genome file "+options.genome)
 
-gene_lines=[]
-gene_stats={}
+	gene_lines=[]
+	gene_stats={}
 
-for line in inf:
+	for line in inf:
 
-	# simply print comment lines
-	if line.startswith('#'):
-		outf.write(line)
-		continue
+		# simply print comment lines
+		if line.startswith('#'):
+			outf.write(line)
+			continue
 
-	ls=line.strip().split("\t")
+		ls=line.strip().split("\t")
 
-	# if this line defines a gene, print lines for preceding gene and print this one
-	if ls[2]=='gene':
+		# if this line defines a gene, print lines for preceding gene and print this one
+		if ls[2]=='gene':
 
-		try:
-			gene,stats=write_gene_lines(gene_lines, outf)
-			if gene not in gene_stats:
-				gene_stats[gene]=stats
-			else:
-				raise Exception("more than one bunch of lines for "+gene)
-		except:
-			pass
+			try:
+				gene,stats=write_gene_lines(gene_lines, outf)
+				if gene not in gene_stats:
+					gene_stats[gene]=stats
+				else:
+					raise Exception("more than one bunch of lines for "+gene)
+			except:
+				pass
 
-		outf.write(line)
-		gene_lines=[]
+			outf.write(line)
+			gene_lines=[]
 
-	elif ls[2]=='transcript':
+		elif ls[2]=='transcript':
 
-		# if line defines a transcript, print it
-		outf.write(line)
+			# if line defines a transcript, print it
+			outf.write(line)
 
-	else:
+		else:
 
-		# if line is not gene or transcript, add it to gene_lines
-		gene_lines.append(line)
+			# if line is not gene or transcript, add it to gene_lines
+			gene_lines.append(line)
 
-try:
-	gene,stats=write_gene_lines(gene_lines, outf)
-	if gene not in gene_stats:
-		gene_stats[gene]=stats
-	else:
-		raise Exception("more than one bunch of lines for "+gene)
-except:
-	pass
+	try:
+		gene,stats=write_gene_lines(gene_lines, outf)
+		if gene not in gene_stats:
+			gene_stats[gene]=stats
+		else:
+			raise Exception("more than one bunch of lines for "+gene)
+	except:
+		pass
 
-outf.close()
+	outf.close()
 
-gene_stats=pd.DataFrame.from_dict(gene_stats,orient='index')
-try:
-	gene_stats.to_csv(options.stats)
-	print >> sys.stderr, 'saving gene stats to '+options.stats
-except:
-	pass
+	try:
+		print >> sys.stderr, 'saving gene stats to '+options.stats
+		gene_stats=pd.DataFrame.from_dict(gene_stats,orient='index')
+		gene_stats.to_csv(options.stats)
+	except:
+		pass

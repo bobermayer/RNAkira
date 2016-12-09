@@ -809,7 +809,7 @@ if __name__ == '__main__':
 	parser.add_option('-U','--unlabeled_exons',dest='unlabeled_exons',help="featureCounts output for unlabeled RNA mapped to exons")
 	parser.add_option('-t','--time_points',dest='time_points',help="comma-separated list of time points (integer or floating-point), MUST correspondg to the data columns in the featureCount outputs and be the same for all fractions")
 	parser.add_option('-T','--labeling_time',dest='T',help="labeling time",type=float)
-	parser.add_option('-o','--outfile',dest='outf',help="output file (default: stdout)")
+	parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix (default: RNAkira)")
 	parser.add_option('','--alpha',dest='alpha',help="FDR cutoff (default: 0.05)",default=0.05,type=float)
 	parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test (default: 5)",default=5,type=int)
 	parser.add_option('','--min_TPM_total',dest='min_TPM_total',help="min TPM for total (default: .1)",default=.1,type=float)
@@ -818,13 +818,11 @@ if __name__ == '__main__':
 
 	options,args=parser.parse_args()
 
-	try:
-		time_points=options.time_points.split(',')
-	except:
-		raise Exception("couldn't parse time points {0}".format(options.time_points))
+	time_points=options.time_points.split(',')
 
 	if len(set(Counter(time_points).values())) > 1:
 		raise Exception("unequal number of replicates at timepoints; can't deal with that")
+
 	nreps=Counter(time_points)[time_points[0]]
 
 	samples=[]
@@ -836,81 +834,54 @@ if __name__ == '__main__':
 		
 		print >> sys.stderr, '\n[main] reading corrected TPM values from '+options.input_TPM
 		print >> sys.stderr, '       ignoring options -geEfFruU'
-		try:
-			TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
-		except:
-			raise Exception("couldn't read TPM file "+options.input_TPM)
+		TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
 
 	else:
 
 		print >> sys.stderr, "\n[main] reading count data"
 
-		try:
-			print >> sys.stderr, '   elu-introns:\t\t'+options.elu_introns
-			elu_introns=pd.read_csv(options.elu_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			elu_introns.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.elu_introns)
+		print >> sys.stderr, '   elu-introns:\t\t'+options.elu_introns
+		elu_introns=pd.read_csv(options.elu_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		elu_introns.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   elu-exons:\t\t'+options.elu_exons
-			elu_exons=pd.read_csv(options.elu_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			elu_exons.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.elu_exons)
+		print >> sys.stderr, '   elu-exons:\t\t'+options.elu_exons
+		elu_exons=pd.read_csv(options.elu_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		elu_exons.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   flowthrough-introns:\t'+options.flowthrough_introns
-			flowthrough_introns=pd.read_csv(options.flowthrough_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			flowthrough_introns.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.flowthrough_introns)
+		print >> sys.stderr, '   flowthrough-introns:\t'+options.flowthrough_introns
+		flowthrough_introns=pd.read_csv(options.flowthrough_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		flowthrough_introns.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
-			flowthrough_exons=pd.read_csv(options.flowthrough_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			flowthrough_exons.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.flowthrough_exons)
+		print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
+		flowthrough_exons=pd.read_csv(options.flowthrough_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		flowthrough_exons.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   ribo:\t\t'+options.ribo
-			ribo=pd.read_csv(options.ribo,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			ribo.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.ribo)
+		print >> sys.stderr, '   ribo:\t\t'+options.ribo
+		ribo=pd.read_csv(options.ribo,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		ribo.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
-			unlabeled_introns=pd.read_csv(options.unlabeled_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			unlabeled_introns.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.unlabeled_introns)
+		print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
+		unlabeled_introns=pd.read_csv(options.unlabeled_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		unlabeled_introns.columns=['length']+samples
 
-		try:
-			print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
-			unlabeled_exons=pd.read_csv(options.unlabeled_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-			unlabeled_exons.columns=['length']+samples
-		except:
-			raise Exception("couldn't read input file "+options.unlabeled_exons)
+		print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
+		unlabeled_exons=pd.read_csv(options.unlabeled_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
+		unlabeled_exons.columns=['length']+samples
 
 		print >> sys.stderr, "\n[main] merging count values and computing TPM using gene stats from "+options.gene_stats
 
 		cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
 		TPM=pd.concat(map(get_TPM,[elu_introns,elu_exons,flowthrough_introns,flowthrough_exons,ribo,unlabeled_introns,unlabeled_exons]),axis=1,keys=cols)
 
-		TPM.to_csv('TPM.csv')
+		TPM.to_csv(options.out_prefix+'_TPM.csv')
 
-		try:
-			gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
-		except:
-			raise Exception("couldn't read gene stats file "+options.gene_stats)
+		gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 
 		print >> sys.stderr, '\n[main] correcting TPM values'
 
 		TPM=correct_TPM (TPM, samples, gene_stats)
 
-		TPM.to_csv("corrected_TPM.csv")
+		TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
 
 	print >> sys.stderr, '\n[main] estimating dispersion'
 
@@ -931,12 +902,7 @@ if __name__ == '__main__':
 	print >> sys.stderr, '\n[main] collecting output'
 	output=collect_results(results, time_points, sig_level=options.alpha)
 
-	try:
-		outf=open(options.outf,'w');
-		print >> sys.stderr, '\n   writing results to {0}'.format(options.outf)
-	except:
-		outf=sys.stdout
-		print >> sys.stderr, '\n   writing results to stdout'
+	print >> sys.stderr, '\n   writing results to {0}'.format(options.out_prefix+'_results.csv')
 
-	output.to_csv(outf)
+	output.to_csv(options.out_prefix+'_results.csv')
 
