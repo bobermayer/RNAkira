@@ -89,7 +89,7 @@ def get_steady_state_values (x,T,use_ribo,use_deriv=False):
 	else:
 		return np.array(exp_mean)
 
-def get_rates(time_points, pars, errs=None):
+def get_rates(time_points, pars):
 
 	""" expands log rates over time points given rate change parameters """
 
@@ -116,32 +116,9 @@ def get_rates(time_points, pars, errs=None):
 			log_d+=pars['delta']*times
 		rates.append(log_d)
 
-	if errs is None:
+	return rates
 
-		return rates
-
-	else:
-
-		log_a_err=errs['log_a0']*np.ones(ntimes)
-		if 'alpha' in errs:
-			log_a_err+=errs['alpha']*times
-		log_b_err=errs['log_b0']*np.ones(ntimes)
-		if 'beta' in errs:
-			log_b_err+=errs['beta']*times
-		log_c_err=errs['log_c0']*np.ones(ntimes)
-		if 'gamma' in errs:
-			log_c_err+=errs['gamma']*times
-
-		rate_errs=[log_a_err,log_b_err,log_c_err]
-
-		if use_ribo:
-			log_d_err=errs['log_d0']*np.ones(ntimes)
-			if 'delta' in errs:
-				log_d_err+=errs['delta']*times
-			rate_errs.append(log_d_err)
-
-		return zip(rates,rate_errs)
-			
+		
 def steady_state_log_likelihood (x, obs_mean, obs_std, T, time_points, prior_mu, prior_std, model_pars, use_ribo, use_deriv):
 
 	""" log-likelihood function for difference between expected and observed values, including all priors """
@@ -265,17 +242,8 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 									args=args, \
 									**min_args)
 
-		# get fit errors from Hessian inverse if possible
-		if min_args['method']=='L-BFGS-B':
-			err=np.sqrt(np.diag(res.hess_inv.todense()))
-		elif min_args['method']=='BFGS':
-			err=np.sqrt(np.diag(res.hess_inv))
-		else:
-			err=np.nan*np.ones(len(model_pars))
-
 		# collect results
 		result=dict(est_pars=pd.Series(res.x,index=model_pars),\
-					est_err=pd.Series(err,index=model_pars),\
 					L=-res.fun,\
 					success=res.success,\
 					npars=len(model_pars),
@@ -285,7 +253,6 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 
 		# in the 'all' models, treat every time point independently
 		x=[]
-		err=[]
 		L=0
 		npars=0
 		success=True
@@ -325,20 +292,11 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 
 			x.append(res.x)
 
-			# get fit errors from Hessian inverse if possible
-			if min_args['method']=='L-BFGS-B':
-				err.append(np.sqrt(np.diag(res.hess_inv.todense())))
-			elif min_args['method']=='BFGS':
-				err.append(np.sqrt(np.diag(res.hess_inv)))
-			else:
-				err.append(np.nan*np.ones(len(model_pars)))
-
 			L+=-res.fun
 			success=success & res.success
 			npars+=len(model_pars)
 
 		result=dict(est_pars=pd.DataFrame(x,columns=model_pars,index=time_points),\
-					est_err=pd.DataFrame(err,columns=model_pars,index=time_points),\
 					L=L,\
 					success=success,\
 					npars=npars,\
@@ -374,7 +332,7 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 
 	fig=plt.figure(figsize=(15,6))
 	fig.clf()
-	fig.subplots_adjust(wspace=.4,hspace=.4)
+	fig.subplots_adjust(wspace=.5,hspace=.4,left=.05,right=.98)
 
 	ax=[fig.add_subplot(2,ndim,i+1) for i in range(ndim+nrates)]
 
@@ -417,14 +375,12 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 			ax[ndim+i].fill_between(times,np.ones(ntimes)*(priors.ix[i,'mu']-1.96*priors.ix[i,'std']),\
 								 y2=np.ones(ntimes)*(priors.ix[i,'mu']+1.96*priors.ix[i,'std']),color='Gray',alpha=.25,label='95% prior')
 	for level,vals in enumerate(results):
-		for i,p,err in enumerate(get_rates(time_points,vals['est_pars'],vals['est_err'])):
-			if level > 1:
-				qval=vals['LRT-q']
-				ax[ndim+i].errorbar(times,p,yerr=err,linestyle=('-' if qval < sig_level else '--'),label='{0} (q={1:.2g})'.format(vals['model'],qval))
-			elif level==1:
-				ax[ndim+i].errorbar(times,p,yerr=err,linestyle='-',label='{0}'.format(vals['model']))
+		for i,p in enumerate(get_rates(time_points,vals['est_pars'])):
+			qval=vals['LRT-q']
+			if level >= 1:
+				ax[ndim+i].plot(times,p,linestyle=('-' if qval < sig_level else '--'),label='{0} (q={1:.2g})'.format(vals['model'],qval))
 			else:
-				ax[ndim+i].errorbar(times,p,yerr=err,linestyle=':',label='initial')
+				ax[ndim+i].plot(times,p,linestyle=':',label='initial')
 
 	for i,t in enumerate(['synthesis','degradation','processing','translation'][:nrates]):
 		ax[ndim+i].set_title(t+' rate',size=10)
@@ -459,9 +415,9 @@ def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=.1, maxlevel=None, priors=N
 	# define nested hierarchy of models (model name, model parameters, parent models)
 	rna_pars=['log_a0','log_b0','log_c0']
 	ribo_pars=rna_pars+['log_d0']
-	models=OrderedDict([(0,OrderedDict([('ribo_all',(rna_pars+['log_d0'],[])),\
+	models=OrderedDict([(0,OrderedDict([('ribo_all',(ribo_pars,[])),\
 										('rna_all',(['log_a0','log_b0','log_c0'],[]))])),\
-						(1,OrderedDict([('ribo_0',(rna_pars+['log_d0'],['ribo_all'])),\
+						(1,OrderedDict([('ribo_0',(ribo_pars,['ribo_all'])),\
 										('rna_0',(['log_a0','log_b0','log_c0'],['rna_all']))])),\
 						(2,OrderedDict([('ribo_a',(ribo_pars+['alpha'],['ribo_0'])),\
 										('ribo_b',(ribo_pars+['beta'],['ribo_0'])),\
@@ -655,49 +611,34 @@ def collect_results (results, time_points, sig_level=0.01):
 		# first get initial fits
 		initial_fit=res[0]
 		pars=initial_fit['est_pars']
-		errs=initial_fit['est_err']
 		tmp=[('initial_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'log_a0'])) for t in time_points]+\
-			[('initial_synthesis_err_t{0}'.format(t),errs.ix[t,'log_a0']*np.exp(pars.ix[t,'log_a0'])) for t in time_points]+\
 			[('initial_degradation_t{0}'.format(t),np.exp(pars.ix[t,'log_b0'])) for t in time_points]+\
-			[('initial_degradation_err_t{0}'.format(t),errs.ix[t,'log_b0']*np.exp(pars.ix[t,'log_b0'])) for t in time_points]+\
-			[('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'log_c0'])) for t in time_points]+\
-			[('initial_processing_err_t{0}'.format(t),errs.ix[t,'log_c0']*np.exp(pars.ix[t,'log_c0'])) for t in time_points]
+			[('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'log_c0'])) for t in time_points]
 		if 'log_d0' in pars:
-			tmp+=[('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'log_d0'])) for t in time_points]+\
-				[('initial_translation_err_t{0}'.format(t),errs.ix[t,'log_d0']*np.exp(pars.ix[t,'log_d0'])) for t in time_points]
+			tmp+=[('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'log_d0'])) for t in time_points]
 		else:
-			tmp+=[('initial_translation_t{0}'.format(t),np.nan) for t in time_points]+\
-				[('initial_translation_err_t{0}'.format(t),np.nan) for t in time_points]
+			tmp+=[('initial_translation_t{0}'.format(t),np.nan) for t in time_points]
 		tmp+=[('initial_logL',initial_fit['L']),\
-				  ('initial_fit_success',initial_fit['success']),\
-				  ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
-				  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan)]
+			  ('initial_fit_success',initial_fit['success']),\
+			  ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
+			  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan)]
 
 		# take best significant model or constant otherwise
 		best_fit=filter(lambda x: (x['model'].endswith('0') or x['LRT-q'] < sig_level),res)[-1]
 		pars=best_fit['est_pars']
-		errs=best_fit['est_err']
 		if 'log_d0' in pars:
-			(log_a,log_a_err),(log_b,log_b_err),(log_c,log_c_err),(log_d,log_d_err)=get_rates(time_points,pars,errs=errs)
+			log_a,log_b,log_c,log_d=get_rates(time_points,pars)
 		else:
-			(log_a,log_a_err),(log_b,log_b_err),(log_c,log_c_err)=get_rates(time_points,pars,errs=errs)
-			log_d,log_d_err=np.nan*np.ones(len(time_points)),np.nan*np.ones(len(time_points))
+			log_a,log_b,log_c=get_rates(time_points,pars)
+			log_d=np.nan*np.ones(len(time_points))
 		tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(log_a[i])) for i,t in enumerate(time_points)]+\
-			[('modeled_synthesis_err_t{0}'.format(t),log_a_err[i]*np.exp(log_a[i])) for i,t in enumerate(time_points)]+\
 			[('modeled_degradation_t{0}'.format(t),np.exp(log_b[i])) for i,t in enumerate(time_points)]+\
-			[('modeled_degradation_err_t{0}'.format(t),log_b_err[i]*np.exp(log_b[i])) for i,t in enumerate(time_points)]+\
 			[('modeled_processing_t{0}'.format(t),np.exp(log_c[i])) for i,t in enumerate(time_points)]+\
-			[('modeled_processing_err_t{0}'.format(t),log_c_err[i]*np.exp(log_c[i])) for i,t in enumerate(time_points)]+\
 			[('modeled_translation_t{0}'.format(t),np.exp(log_d[i])) for i,t in enumerate(time_points)]+\
-			[('modeled_translation_err_t{0}'.format(t),log_d_err[i]*np.exp(log_d[i])) for i,t in enumerate(time_points)]+\
 			[('synthesis_log2FC',pars['alpha']/np.log(2) if 'alpha' in pars else 0),\
-			 ('synthesis_log2FC_err',errs['alpha']/np.log(2) if 'alpha' in errs else 0),\
 			 ('degradation_log2FC',pars['beta']/np.log(2) if 'beta' in pars else 0),\
-			 ('degradation_log2FC_err',errs['beta']/np.log(2) if 'beta' in errs else 0),\
 			 ('processing_log2FC',pars['gamma']/np.log(2) if 'gamma' in pars else 0),\
-			 ('processing_log2FC_err',errs['gamma']/np.log(2) if 'gamma' in errs else 0),\
 			 ('translation_log2FC',pars['delta']/np.log(2) if 'delta' in pars else 0),\
-			 ('translation_log2FC_err',errs['delta']/np.log(2) if 'delta' in errs else 0),\
 			 ('modeled_logL',best_fit['L']),\
 			 ('modeled_fit_success',best_fit['success']),\
 			 ('modeled_pval',best_fit['LRT-p'] if best_fit['model']!='0' else np.nan),\

@@ -31,31 +31,31 @@ and similar for the flowthrough, unlabeled and ribo fractions (use ``-t intron``
 ### 3. run RNAkira
 assuming a labeling time T (which should be much smaller than the difference between any two time points for the steady-state assumption to hold) and time points t1,t2,t3 in duplicates, the tool is called as follows
 ```
-python RNAkira.py 
-    -T T 
-    -t t1,t1,t2,t2,t3,t3 
-    -o out_prefix
-    -g gene_stats.csv 
-    -e elu_counts_introns.txt 
-    -E elu_counts_exons.txt 
-    -f flowthrough_counts_introns.txt 
-    -F flowthrough_counts_exons.txt 
-    -r ribo_counts_CDS.txt 
-    -u unlabeled_counts_introns.txt 
+python RNAkira.py \
+    -T T \
+    -t t1,t1,t2,t2,t3,t3 \
+    -o out_prefix \
+    -g gene_stats.csv \
+    -e elu_counts_introns.txt \
+    -E elu_counts_exons.txt \
+    -f flowthrough_counts_introns.txt \
+    -F flowthrough_counts_exons.txt \
+    -r ribo_counts_CDS.txt \
+    -u unlabeled_counts_introns.txt \
     -U unlabeled_counts_exons.txt  
 ```
 **Note**: for n time points in k replicates, the last n\*k columns of **each** of the featureCounts output files have to correspond exactly to the n\*k time points given as arguments to ``-t``
 
 Alternatively, if you have TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions properly normalized (e.g., the ``corrected_TPM.csv`` output of a previous RNAkira run on the same data, or TPM values for simulated data), you can use
 ```
-python RNAkira.py 
-    -T T 
-    -t t1,t1,t2,t2,t3,t3 
-    -o out_prefix
+python RNAkira.py \
+    -T T \
+    -t t1,t1,t2,t2,t3,t3 \
+    -o out_prefix \
     -i corrected_TPM.csv 
 ```
 
 ## Output
 * out_prefix_TPM.csv -- a csv file with raw TPM values for each fraction and each sample
 * out_prefix_corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 
-* out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing and translation rates (+ error estimates) for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates + errors for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model
+* out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing and translation rates for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model
