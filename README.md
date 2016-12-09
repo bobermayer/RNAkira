@@ -55,6 +55,8 @@ python RNAkira.py \
     -i corrected_TPM.csv 
 ```
 
+Additional options can be explored using ``python RNAkira.py -h``
+
 ## Output
 * out_prefix_TPM.csv -- a csv file with raw TPM values for each fraction and each sample
 * out_prefix_corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 

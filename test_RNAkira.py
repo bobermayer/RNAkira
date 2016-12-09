@@ -11,6 +11,43 @@ from optparse import OptionParser
 plt.ion()
 np.random.seed(0)
 
+# change here if you want to test other scenarios
+# these are prior estimates similar to what we observe in our data
+true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.5,-1.2,0,.01,.01,.01,.01]),std=np.array([1.5,1.3,.8,.6,.01,.005,.005,.005])),\
+						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
+
+# distribute models over genes, make sure most genes don't change for multiple testing correction to work
+true_gene_class=['ribo_0']*2000+\
+	['ribo_a']*50+\
+	['ribo_b']*50+\
+	['ribo_c']*50+\
+	['ribo_d']*50+\
+	['ribo_ab']*20+\
+	['ribo_ac']*20+\
+	['ribo_ad']*20+\
+	['ribo_bc']*20+\
+	['ribo_bd']*20+\
+	['ribo_cd']*20+\
+	['ribo_abc']*15+\
+	['ribo_acd']*15+\
+	['ribo_abd']*15+\
+	['ribo_bcd']*15+\
+	['ribo_abcd']*20+\
+	['ribo_all']*100
+
+
+# define time points
+time_points=['0','12','24','36','48']
+times=map(float,time_points)
+# define number of replicates
+replicates=map(str,range(10))
+# labeling time
+T=1
+# noise level (decrease for testing)
+sigma_f=1
+# parameters of mean-variance relationship: std = sqrt(mu + 2**(-ma)*mu**(2-mb))
+ma,mb=5.,0.
+
 # model definition (same as in RNAkira)
 
 rna_pars=['log_a0','log_b0','log_c0']
@@ -45,29 +82,6 @@ models=OrderedDict([(0,OrderedDict([('ribo_all',(ribo_pars,[])),\
 nlevels=len(models)
 model_pars=dict((m,v[0]) for l in range(nlevels) for m,v in models[l].iteritems())
 
-# change here if you want to test other scenarios
-
-true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.5,-1.2,0,.01,.01,.01,.01]),std=np.array([1.5,1.3,.8,.6,.01,.005,.005,.005])),\
-						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
-
-true_gene_class=['ribo_0']*2000+\
-	['ribo_a']*50+\
-	['ribo_b']*50+\
-	['ribo_c']*50+\
-	['ribo_d']*50+\
-	['ribo_ab']*20+\
-	['ribo_ac']*20+\
-	['ribo_ad']*20+\
-	['ribo_bc']*20+\
-	['ribo_bd']*20+\
-	['ribo_cd']*20+\
-	['ribo_abc']*15+\
-	['ribo_acd']*15+\
-	['ribo_abd']*15+\
-	['ribo_bcd']*15+\
-	['ribo_abcd']*20+\
-	['ribo_all']*100
-
 parser=OptionParser()
 parser.add_option('-i','--values',dest='values',help="file with simulated TPM (created by test_RNAkira.py)")
 parser.add_option('-o','--outf',dest='outf',help="save simulated TPM to this file")
@@ -95,14 +109,7 @@ if options.values is not None:
 	parameters_known=False
 
 else:
-
-	time_points=['0','12','24','36','48']
-	times=map(float,time_points)
-	replicates=map(str,range(10))
-	T=1
-	sigma_f=1
-	ma,mb=5.,0.
-
+	
 	cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','ribo','unlabeled-precursor','unlabeled-total']
 
 	nGenes=len(true_gene_class)
@@ -154,7 +161,7 @@ else:
 
 			mu=RNAkira.get_steady_state_values([log_a[i],log_b[i],log_c[i],log_d[i]],T,use_ribo=True)
 
-			# use overdispersed gamma distribution (here: std = mu + 2^(-a) mu^(2-b))
+			# use overdispersed gamma distribution (here: std = sqrt(mu + 2^(-ma) mu^(2-mb)))
 			std=sigma_f*np.sqrt(mu+2**(-ma)*mu**(2-mb))
 
 			vals.append([scipy.stats.gamma.rvs((mu[n]/std[n])**2,scale=std[n]**2/mu[n],size=len(replicates)) for n in range(len(mu))])
@@ -184,15 +191,18 @@ print >> sys.stderr, '\n[test_RNAkira] evaluating performance'
 inferred_gene_class=output.ix[genes,'best_model']
 inferred_gene_class[output.ix[genes,'initial_qval'] < .05]='ribo_all'
 
-genes_to_plot=genes[np.where(inferred_gene_class!=true_gene_class)[0]]
-np.random.shuffle(genes_to_plot)
+# use this if you want to plot specific examples
+if False:
 
-for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-	RNAkira.plot_data_rates_fits(time_points,replicates,values.ix[gene,'mean'],T,\
-								 parameters[gene] if parameters_known else None,\
-								 results[gene],True,\
-								 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
-								 priors=None,sig_level=sig_level)
+	genes_to_plot=genes[np.where(inferred_gene_class!=true_gene_class)[0]]
+	np.random.shuffle(genes_to_plot)
+
+	for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
+		RNAkira.plot_data_rates_fits(time_points,replicates,values.ix[gene,'mean'],T,\
+									 parameters[gene] if parameters_known else None,\
+									 results[gene],True,\
+									 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
+									 priors=None,sig_level=sig_level)
 
 mods=[m for lev in [1,2,3,4,5,0] for m in models[lev] if 'rna' not in m]
 matches=np.array([[np.sum((true_gene_class==m1) & (inferred_gene_class==m2)) for m2 in mods] for m1 in mods])

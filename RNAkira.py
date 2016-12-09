@@ -649,14 +649,17 @@ def collect_results (results, time_points, sig_level=0.01):
 
 	return pd.DataFrame.from_dict(output,orient='index')
 
-def correct_TPM (TPM, samples, gene_stats):
+def correct_TPM (TPM, samples, gene_stats, do_plot=False):
+
+	if do_plot:
+		from matplotlib import pyplot as plt
 
 	""" corrects 4sU incorporation bias and fixes library size normalization of TPM values """
 
 	print >> sys.stderr, '\n[correct_TPM] correcting for 4sU incorporation bias and normalizing by linear regression'
 
 	# select reliable genes with decent mean expression level in unlabeled mature
-	reliable_genes=(gene_stats['gene_type']=='protein_coding') & (TPM['unlabeled-mature'] > TPM['unlabeled-mature'].dropna().quantile(.9)).any(axis=1)
+	reliable_genes=(gene_stats['gene_type']=='protein_coding') & (TPM['unlabeled-mature'] > TPM['unlabeled-mature'].dropna().quantile(.2)).any(axis=1)
 
 	# collect corrected values
 	corrected_TPM=pd.DataFrame(index=TPM.index)
@@ -667,15 +670,31 @@ def correct_TPM (TPM, samples, gene_stats):
 
 		t,r=sample.split('-')
 
+		if do_plot:
+			fig=plt.figure(figsize=(8,4))
+			fig.clf()
+
 		print >> sys.stderr, '{0} ({1})'.format(t,r),
 
 		log2_elu_ratio=np.log2(TPM['elu-mature',sample]/TPM['unlabeled-mature',sample])
 		log2_FT_ratio=np.log2(TPM['flowthrough-mature',sample]/TPM['unlabeled-mature',sample])
 
-		ok=np.isfinite(log2_elu_ratio) & reliable_genes
-		lowess_elu=statsmodels.nonparametric.smoothers_lowess.lowess(log2_elu_ratio[ok],gene_stats['exon_ucount'][ok],frac=0.66,it=1).T
-		interp_elu=scipy.interpolate.interp1d(lowess_elu[0],lowess_elu[1],bounds_error=False)
-		log2_elu_ratio_no_bias=log2_elu_ratio-interp_elu(gene_stats['exon_ucount'])
+		log10_ucount=np.log10(gene_stats['exon_ucount'])
+		ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
+		log10_ucount_range=np.abs(log10_ucount[ok].max()-log10_ucount[ok].min())
+		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log2_elu_ratio[ok],log10_ucount[ok],\
+																 frac=0.66,it=1,delta=.001*log10_ucount_range).T
+		interp_elu=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
+		log2_elu_ratio_no_bias=log2_elu_ratio-interp_elu(log10_ucount)
+
+		if do_plot:
+			ax=fig.add_subplot(121)
+			ax.hexbin(gene_stats['exon_ucount'][ok],log2_elu_ratio[ok],bins='log',extent=(0,5000,-2.5,2.5),lw=0)
+			ax.plot(10**np.arange(0,4,.1),interp_elu(np.arange(0,4,.1)),'r-')
+			ax.set_xlim([0,5000])
+			ax.set_title('n={0}'.format(ok.sum()),size=10)
+			ax.set_ylabel('log2 elu/total')
+			ax.set_xlabel('# U residues')
 
 		elu_percentiles=np.percentile(log2_elu_ratio_no_bias[ok],[5,95])
 		FT_percentiles=np.percentile(log2_FT_ratio[ok],[5,95])
@@ -686,6 +705,18 @@ def correct_TPM (TPM, samples, gene_stats):
 
 		if intercept < 0 or slope > 0:
 			raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
+
+		if do_plot:
+			ax=fig.add_subplot(122)
+			ax.hexbin(2**log2_elu_ratio_no_bias,2**log2_FT_ratio,bins='log',lw=0,extent=(-.1,5,-.1,3))
+			ax.plot(np.arange(0,5,.01),intercept+slope*np.arange(0,5,.01),'r-')
+			ax.set_xlim([-.1,5])
+			ax.set_ylim([-.1,3])
+			ax.set_title('n={0}'.format(ok.sum()),size=10)
+			ax.set_xlabel('elu/total')
+			ax.set_ylabel('FT/total')
+
+			fig.suptitle(sample)
 
 		# corrected values for precursors
 		corrected_TPM[('unlabeled-precursor',t,r)]=TPM['unlabeled-precursor',sample]
@@ -704,28 +735,51 @@ def correct_TPM (TPM, samples, gene_stats):
 
 	corrected_TPM.columns=pd.MultiIndex.from_tuples(corrected_TPM.columns)
 
+	if do_plot:
+		plt.show()
+
 	print >> sys.stderr, '\n'
 
 	return corrected_TPM
 
-def estimate_dispersion (TPM, cols): 
+def estimate_dispersion (TPM, cols, do_plot=False): 
 
 	""" estimates dispersion by simply smoothing the mean-variance plot taken across all samples to the columns given in vols """
+
+	if do_plot:
+		from matplotlib import pyplot as plt
 
 	std_TPM=[]
 	print >> sys.stderr, '\n[estimate_dispersion] averaging samples:\n   ',
 	for c in cols:
 		print >> sys.stderr, c, 
-		means=TPM[c].mean(axis=1,level=0)
-		CV=TPM[c].std(axis=1,level=0)/means
-		ok=np.isfinite(means).all(axis=1) & np.isfinite(CV).all(axis=1)
-		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(CV[ok].values.flatten(),means[ok].values.flatten(),frac=0.5,it=1).T
-		interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
+		# perform lowess regression on log CV vs log mean
+		log10_means=np.log10(TPM[c].mean(axis=1,level=0))
+		log10_CV=np.log10(TPM[c].std(axis=1,level=0)/TPM[c].mean(axis=1,level=0))
+		ok=(np.isfinite(log10_means) & np.isfinite(log10_CV)).all(axis=1)
+		log10_mean_range=np.abs(log10_means[ok].max().max()-log10_means[ok].min().min())
+		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV[ok].values.flatten(),\
+																 log10_means[ok].values.flatten(),frac=0.2,it=1,delta=.01*log10_mean_range).T
+		interp=scipy.interpolate.interp1d(10**lowess[0],10**lowess[1],bounds_error=False)
 		std_TPM.append(TPM[c].apply(interp)*TPM[c])
+		if do_plot:
+			fig=plt.figure(figsize=(4,3))
+			fig.clf()
+			ax=fig.add_axes([.2,.25,.7,.65])
+			ax.hexbin(log10_means.values.flatten(),log10_CV.values.flatten(),bins='log',lw=0,extent=(-3,5,-4,1))
+			ax.plot(lowess[0],lowess[1],'r-')
+			ax.set_xlim([-3,5])
+			ax.set_ylim([-4,1])
+			ax.set_title('{0}: n={1}'.format(c,ok.sum()),size=10)
+			ax.set_xlabel('log10 mean')
+			ax.set_ylabel('log10 CV')
 
 	std_TPM=pd.concat(std_TPM,axis=1,keys=cols)
 
 	print >> sys.stderr, '\n'
+
+	if do_plot:
+		plt.show()
 
 	return pd.concat([TPM,std_TPM],axis=1,keys=['mean','std']).sort_index(axis=1)
 
@@ -756,6 +810,7 @@ if __name__ == '__main__':
 	parser.add_option('','--min_TPM_total',dest='min_TPM_total',help="min TPM for total (default: .1)",default=.1,type=float)
 	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor (default: .001)",default=.001,type=float)
 	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo (default: .1)",default=.1,type=float)
+	parser.add_option('','--do_plots',dest='do_plots',help="create plots for 4sU bias correction and normalization",action='store_true')
 
 	options,args=parser.parse_args()
 
@@ -814,25 +869,27 @@ if __name__ == '__main__':
 		cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
 		TPM=pd.concat(map(get_TPM,[elu_introns,elu_exons,flowthrough_introns,flowthrough_exons,ribo,unlabeled_introns,unlabeled_exons]),axis=1,keys=cols)
 
+		print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
 		TPM.to_csv(options.out_prefix+'_TPM.csv')
 
 		gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 
 		print >> sys.stderr, '\n[main] correcting TPM values'
 
-		TPM=correct_TPM (TPM, samples, gene_stats)
+		TPM=correct_TPM (TPM, samples, gene_stats, do_plot=options.do_plots)
 
+		print >> sys.stderr, '[main] saving corrected TPM values to '+options.out_prefix+'_corrected_TPM.csv'
 		TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
 
 	print >> sys.stderr, '\n[main] estimating dispersion'
 
 	cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','ribo','unlabeled-precursor','unlabeled-total']
-	TPM=estimate_dispersion (TPM, cols)
+	TPM=estimate_dispersion (TPM, cols, do_plot=options.do_plots)
 
 	# select genes based on TPM cutoffs for total, precursor in any of the time points
 	ok=(TPM['mean','unlabeled-total'] > options.min_TPM_total).any(axis=1) &\
 		(TPM['mean','unlabeled-precursor'] > options.min_TPM_precursor).any(axis=1)
-	
+
 	# take only those genes
 	TPM_here=TPM[ok].fillna(0)
 
