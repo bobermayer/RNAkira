@@ -679,7 +679,7 @@ def correct_TPM (TPM, samples, gene_stats, do_plot=False):
 		log2_elu_ratio=np.log2(TPM['elu-mature',sample]/TPM['unlabeled-mature',sample])
 		log2_FT_ratio=np.log2(TPM['flowthrough-mature',sample]/TPM['unlabeled-mature',sample])
 
-		log10_ucount=np.log10(gene_stats['exon_ucount'])
+		log10_ucount=np.log10(1+gene_stats['exon_ucount'])
 		ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
 		log10_ucount_range=np.abs(log10_ucount[ok].max()-log10_ucount[ok].min())
 		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log2_elu_ratio[ok],log10_ucount[ok],\
@@ -696,8 +696,8 @@ def correct_TPM (TPM, samples, gene_stats, do_plot=False):
 			ax.set_ylabel('log2 elu/total')
 			ax.set_xlabel('# U residues')
 
-		elu_percentiles=np.percentile(log2_elu_ratio_no_bias[ok],[5,95])
-		FT_percentiles=np.percentile(log2_FT_ratio[ok],[5,95])
+		elu_percentiles=np.percentile(log2_elu_ratio_no_bias[ok].dropna(),[5,95])
+		FT_percentiles=np.percentile(log2_FT_ratio[ok].dropna(),[5,95])
 		ok=np.isfinite(log2_elu_ratio_no_bias) & np.isfinite(log2_FT_ratio) & reliable_genes & \
 			(log2_elu_ratio_no_bias > elu_percentiles[0]) & (log2_elu_ratio_no_bias < elu_percentiles[1]) & \
 			(log2_FT_ratio > FT_percentiles[0]) & (log2_FT_ratio < FT_percentiles[1])
