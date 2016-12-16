@@ -783,12 +783,14 @@ def estimate_dispersion (TPM, cols, do_plot=False):
 
 	return pd.concat([TPM,std_TPM],axis=1,keys=['mean','std']).sort_index(axis=1)
 
-def get_TPM (fc_table):
-	
-	""" computes RPKM and then TPM values from featureCounts output """
+def get_RPK_from_featureCount (inf,samples):
 
-	rpkm=fc_table.ix[:,1:].divide(fc_table['length']/1.e3,axis=0).divide(fc_table.ix[:,1:].sum(axis=0)/1.e6,axis=1)
-	return rpkm.divide(rpkm.sum(axis=0)/1.e6,axis=1)
+	""" gets read counts per kb values (RPK) from featureCount output file inf and adds samples as column names """
+
+	fc_table=pd.read_csv(inf,sep='\t',comment='#',index_col=0,header=0)
+	RPK=fc_table.ix[:,5:].divide(fc_table.ix[:,4]/1.e3,axis=0)
+	RPK.columns=samples
+	return RPK
 
 if __name__ == '__main__':
 
@@ -837,37 +839,44 @@ if __name__ == '__main__':
 		print >> sys.stderr, "\n[main] reading count data"
 
 		print >> sys.stderr, '   elu-introns:\t\t'+options.elu_introns
-		elu_introns=pd.read_csv(options.elu_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		elu_introns.columns=['length']+samples
+		elu_introns=get_RPK_from_featureCount(options.elu_introns,samples)
 
 		print >> sys.stderr, '   elu-exons:\t\t'+options.elu_exons
-		elu_exons=pd.read_csv(options.elu_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		elu_exons.columns=['length']+samples
+		elu_exons=get_RPK_from_featureCount(options.elu_exons,samples)
 
 		print >> sys.stderr, '   flowthrough-introns:\t'+options.flowthrough_introns
-		flowthrough_introns=pd.read_csv(options.flowthrough_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		flowthrough_introns.columns=['length']+samples
+		flowthrough_introns=get_RPK_from_featureCount(options.flowthrough_introns,samples)
 
 		print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
-		flowthrough_exons=pd.read_csv(options.flowthrough_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		flowthrough_exons.columns=['length']+samples
+		flowthrough_exons=get_RPK_from_featureCount(options.flowthrough_exons,samples)
 
 		print >> sys.stderr, '   ribo:\t\t'+options.ribo
-		ribo=pd.read_csv(options.ribo,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		ribo.columns=['length']+samples
+		ribo=get_RPK_from_featureCount(options.ribo,samples)
 
 		print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
-		unlabeled_introns=pd.read_csv(options.unlabeled_introns,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		unlabeled_introns.columns=['length']+samples
+		unlabeled_introns=get_RPK_from_featureCount(options.unlabeled_introns,samples)
 
 		print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
-		unlabeled_exons=pd.read_csv(options.unlabeled_exons,sep='\t',comment='#',index_col=0,header=0).ix[:,4:]
-		unlabeled_exons.columns=['length']+samples
+		unlabeled_exons=get_RPK_from_featureCount(options.unlabeled_exons,samples)
 
 		print >> sys.stderr, "\n[main] merging count values and computing TPM using gene stats from "+options.gene_stats
 
+		# add up RPK values for different fractions (introns and exons), count missing entries as zero
+		elu_factor=elu_exons.add(elu_introns,fill_value=0).sum(axis=0)/1.e6
+		flowthrough_factor=flowthrough_exons.add(flowthrough_introns,fill_value=0).sum(axis=0)/1.e6
+		unlabeled_factor=unlabeled_exons.add(unlabeled_introns,fill_value=0).sum(axis=0)/1.e6
+		# for ribo, do as usual
+		ribo_factor=ribo.sum(axis=0)/1.e6
+
+		# normalize RPK values to TPM and combine in TPM dataframe
 		cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
-		TPM=pd.concat(map(get_TPM,[elu_introns,elu_exons,flowthrough_introns,flowthrough_exons,ribo,unlabeled_introns,unlabeled_exons]),axis=1,keys=cols)
+		TPM=pd.concat([elu_introns.divide(elu_factor,axis=1),\
+					   elu_exons.divide(elu_factor,axis=1),\
+					   flowthrough_introns.divide(flowthrough_factor,axis=1),\
+					   flowthrough_exons.divide(flowthrough_factor,axis=1),\
+					   ribo.divide(ribo_factor,axis=1),\
+					   unlabeled_introns.divide(unlabeled_factor,axis=1),\
+					   unlabeled_exons.divide(unlabeled_factor,axis=1)],axis=1,keys=cols)
 
 		print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
 		TPM.to_csv(options.out_prefix+'_TPM.csv')

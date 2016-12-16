@@ -13,7 +13,7 @@ np.random.seed(0)
 
 # change here if you want to test other scenarios
 # these are prior estimates similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.5,-1.2,0,.01,.01,.01,.01]),std=np.array([1.5,1.3,.8,.6,.01,.005,.005,.005])),\
+true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.3,1.2,0.1,.01,.01,.01,.01]),std=np.array([1.3,1.,1.5,.6,.01,.005,.005,.005])),\
 						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
 # distribute models over genes, make sure most genes don't change for multiple testing correction to work
