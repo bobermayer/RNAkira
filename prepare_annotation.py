@@ -177,7 +177,7 @@ if __name__ == '__main__':
 			inf=open(options.infile)
 
 	if options.outfile is None:
-		print >> sys.stderr, 'writing to '+options.outfile
+		print >> sys.stderr, 'writing to stdout'
 		outf=sys.stdout
 	else:
 		print >> sys.stderr, 'writing to '+options.outfile
@@ -186,10 +186,8 @@ if __name__ == '__main__':
 		else:
 			outf=open(options.outfile,'w')
 
-	try:
+	if options.stats is not None:
 		genome=TwoBitFile(options.genome)
-	except:
-		raise Exception("could not open genome file "+options.genome)
 
 	gene_lines=[]
 	gene_stats={}
