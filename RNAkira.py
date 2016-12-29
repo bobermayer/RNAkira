@@ -34,7 +34,7 @@ def p_adjust_bh(p):
 
 def get_steady_state_values (x,T,use_ribo,use_deriv=False):
 
-	""" given synthesis, degradation, processing and potentially translation rates x=(a,b,c,d) and labeling time T
+	""" given synthesis, degradation, processing rates and potentially translation efficiencies x=(a,b,c,d) and labeling time T
 	returns instantaneous steady-state values for elu-precursor,elu-total,flowthrough-precursor,flowthrough-total,unlabeled-precursor,unlabeled-total
 	ribo if use_ribo is set
 	includes derivatives w.r.t. log(a),log(b),log(c) and maybe log(d) if use_deriv is set """
