@@ -17,7 +17,7 @@ Precursor RNA is estimated from intronic RNA read counts, mature from exonic RNA
 ### 1. prepare annotation
 The script ``prepare_annotation.py`` takes a Gencode gtf file, adds features for introns, and distinguishes UTR features into UTR3 or UTR5. It also counts T occurrences in exonic regions (genome must be supplied as 2bit file) for later 4sU incorporation bias correction, and outputs a csv file with gene stats (length of transcript regions, gene types, exonic and intronic T counts)
 ```
-prepare_annotation.py -i annotation.gtf.gz -o annotation_with_introns.gtf -s gene_stats.csv -g genome.2bit
+python prepare_annotation.py -i annotation.gtf.gz -o annotation_with_introns.gtf -s gene_stats.csv -g genome.2bit
 ```
 ### 2. run featureCounts on your data
 RNAkira assumes that you have 4 datasets for pre-existing (flowthrough), newly synthesized (elu), unlabeled RNA (unlabeled), and ribosome protected fragments (ribo) for each timepoint. The associated bam files will be quantified over exonic and intronic regions one fraction at a time:
