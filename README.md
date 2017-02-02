@@ -5,7 +5,7 @@ using data from high-throughput sequencing of 4sU-labeled RNA (4sU-seq) and ribo
 It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://bioinformatics.oxfordjournals.org/content/31/17/2829), but key differences are the inclusion of flowthrough data for normalization, ribo-seq data for estimates of translational efficiency, and the assumption of steady-state kinetics.
 
 ## Prerequisites
-RNAkira runs on Python 2.7.11 with numpy (v1.11.1), scipy (v0.17.1), statsmodels (v0.8.0rc1) and pandas (v0.18.1), and twobitreader if prepare_annotation.py is used. Read counts for exonic and intronic regions are expected in [featureCounts](http://bioinf.wehi.edu.au/featureCounts/) output format, but normalized TPM values can be supplied as well.
+RNAkira runs on Python 2.7.11 with numpy (v1.11.1), scipy (v0.17.1), statsmodels (v0.8.0rc1) and pandas (v0.18.1), and twobitreader if prepare_annotation.py is used. Read counts for exonic and intronic regions are expected in [featureCounts](http://bioinf.wehi.edu.au/featureCounts/) output format, but TPM values can be supplied as well.
 
 ## Description
 The tool assumes standard RNA kinetics: precursor RNA *P* is born with synthesis rate *a* and destroyed with processing rate *c*, mature RNA *M* is produced by processing a precursor, translated to ribo *R* with efficiency *d* and destroyed with degradation rate *b*. 
@@ -46,18 +46,22 @@ python RNAkira.py \
 ```
 **Note**: for n time points in k replicates, the last n\*k columns of **each** of the featureCounts output files have to correspond exactly to the n\*k time points given as arguments to ``-t``
 
-Alternatively, if you have TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions properly normalized (e.g., the ``corrected_TPM.csv`` output of a previous RNAkira run on the same data, or TPM values for simulated data), you can use
+Alternatively, if you have TPM values (e.g., when estimating expression of precursor and mature isoforms using tools like [RSEM](http://deweylab.github.io/RSEM/) or [kallisto](https://pachterlab.github.io/kallisto/)), you can use
 ```
 python RNAkira.py \
     -T T \
     -t t1,t1,t2,t2,t3,t3 \
     -o out_prefix \
-    -i corrected_TPM.csv 
+    -i TPM.csv 
 ```
+
+The file ``TPM.csv`` is expected as a pandas-style dataframe with hierarchical column labels: ``elu-precursor, elu-mature, flowthrough-precursor, flowthrough-mature, ribo, unlabeled-precursor, unlabeled-mature`` on the first level and ``t1-Rep1,t1-Rep2,...,t2-Rep1,t2-Rep2,...`` on the second.
 
 Additional options can be explored using ``python RNAkira.py -h``
 
 ## Output
-* out_prefix_TPM.csv -- a csv file with raw TPM values for each fraction and each sample
+* out_prefix_TPM.csv -- a csv file with raw TPM values for each fraction and each sample (only if counts are given)
 * out_prefix_corrected_TPM.csv -- a csv file with TPM values corrected for 4sU incorporation bias and with elu and flowthrough fractions normalized 
+* out_prefix_TPM_correction.pdf -- a plot showing correction of 4sU incorporation bias and normalization of elu and flowthrough fractions for each sample
+* out_prefix_dispersion.pdf -- a plot showing CV vs. mean for each fraction, together with a lowess smoother and estimated values in cyan
 * out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing rates and translational efficiency for each time point from the **initial fit**, together with the log-likelihood of this model, fit success (boolean), and a p- and q-value from comparing to the best model; then rates for each time point for the **best model**, followed by estimated log2 fold changes, the resulting log-likelihood and the fit success, and finally p- and q-value from comparing the best to the next-best model

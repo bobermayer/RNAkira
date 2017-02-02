@@ -20,7 +20,7 @@ def trim_mean_std(x):
 def p_adjust_bh(p):
 
 	""" Benjamini-Hochberg p-value correction for multiple hypothesis testing
-		(stolen and modified for nan values from here: http://stackoverflow.com/questions/7450957/how-to-implement-rs-p-adjust-in-python) """
+		(taken and modified for nan values from here: http://stackoverflow.com/questions/7450957/how-to-implement-rs-p-adjust-in-python) """
 
 	p = np.asfarray(p)
 	ok = np.isfinite(p)
@@ -35,7 +35,7 @@ def p_adjust_bh(p):
 def get_steady_state_values (x,T,use_ribo,use_deriv=False):
 
 	""" given synthesis, degradation, processing rates and potentially translation efficiencies x=(a,b,c,d) and labeling time T
-	returns instantaneous steady-state values for elu-precursor,elu-total,flowthrough-precursor,flowthrough-total,unlabeled-precursor,unlabeled-total
+	returns instantaneous steady-state values for elu-precursor,elu-mature,flowthrough-precursor,flowthrough-mature,unlabeled-precursor,unlabeled-mature
 	ribo if use_ribo is set
 	includes derivatives w.r.t. log(a),log(b),log(c) and maybe log(d) if use_deriv is set """
 
@@ -44,13 +44,13 @@ def get_steady_state_values (x,T,use_ribo,use_deriv=False):
 	else:
 		a,b,c=np.exp(x)
 
-	# for elu-precursor, elu-total (mature+precursor), flowthrough-precursor, flowthrough-total, unlabeled-precursor, unlabeled-total
+	# for elu-precursor, elu-mature, flowthrough-precursor, flowthrough-mature, unlabeled-precursor, unlabeled-mature
 	exp_mean=[a*(1.-np.exp(-c*T))/c,\
-			  a*(b**2*(1.-np.exp(-c*T))-c**2*(1.-np.exp(-b*T)))/(b*c*(b-c)),\
+			  a*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T)))/(b*(b-c)),\
 			  a*np.exp(-c*T)/c,\
-			  a*(b**2*np.exp(-c*T)-c**2*np.exp(-b*T))/(b*c*(b-c)),\
+			  a*(b*np.exp(-c*T)-c*np.exp(-b*T))/(b*(b-c)),\
 			  a/c,\
-			  a/b+a/c]
+			  a/b]
 
 	# add ribo value
 	if use_ribo:
@@ -58,26 +58,26 @@ def get_steady_state_values (x,T,use_ribo,use_deriv=False):
 
 	if use_deriv:
 		# get the derivatives w.r.t. log(a),log(b),log(c)
-		exp_mean_deriv=[[a*(1.-np.exp(-c*T))/c, \
-						 a*(b**2*(1.-np.exp(-c*T))-c**2*(1.-np.exp(-b*T)))/(b*c*(b-c)),\
+		exp_mean_deriv=[[a*(1.-np.exp(-c*T))/c,\
+						 a*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T)))/(b*(b-c)),\
 						 a*np.exp(-c*T)/c,\
-						 a*(b**2*np.exp(-c*T)-c**2*np.exp(-b*T))/(b*c*(b-c)),\
-						 a/c,
-						 a/b+a/c],\
+						 a*(b*np.exp(-c*T)-c*np.exp(-b*T))/(b*(b-c)),\
+						 a/c,\
+						 a/b],\
 						[0, 
-						 a*(b*(b-c)*(2*b*(1.-np.exp(-c*T))-c**2*T*np.exp(-b*T))-\
-							(b**2*(1.-np.exp(-c*T))-c**2*(1.-np.exp(-b*T)))*(2*b-c))/(b*c*(b-c)**2),\
+						 a*(b*(b-c)*(1.-np.exp(-c*T)-c*T*np.exp(-b*T))-\
+							(2*b-c)*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2),\
 						 0,\
-						 a*(b*(b-c)*(T*c**2*np.exp(-b*T)+2*b*np.exp(-c*T))-(b**2*np.exp(-c*T)-c**2*np.exp(-b*T))*(2*b-c))/(b*c*(b-c)**2),\
+						 a*(b*(b-c)*(T*c*np.exp(-b*T)+np.exp(-c*T))-(2*b-c)*(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2),\
 						 0,\
 						 -a/b],\
 						[a*(np.exp(-c*T)*(1.+c*T)-1)/c,\
-						 a*(c*(b-c)*(b**2*T*np.exp(-c*T)-2*c*(1.-np.exp(-b*T)))-\
-							(b**2*(1.-np.exp(-c*T))-c**2*(1.-np.exp(-b*T)))*(b-2*c))/(b*c*(b-c)**2),\
+						 a*c*((b-c)*(b*T*np.exp(-c*T)-1.+np.exp(-b*T))+\
+							  (b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2),\
 						 -a*np.exp(-c*T)*(1.+c*T)/c,\
-						 a*(c*(b-c)*(-2*c*np.exp(-b*T)-T*b**2*np.exp(-c*T))-(b**2*np.exp(-c*T)-c**2*np.exp(-b*T))*(b-2*c))/(b*c*(b-c)**2),\
+						 a*c*((b-c)*(-np.exp(-b*T)-T*b*np.exp(-c*T))+(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2),\
 						 -a/c,\
-						 -a/c]]
+						 0]]
 
 		if use_ribo:
 			# add derivatives of ribo values and derivatives w.r.t. log(d)
@@ -226,12 +226,11 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 		# test gradient against numerical difference if necessary
 		if test_gradient:
 
-			args_here=args[:-2]+(False,)+args[-1:]
 			pp=initial_estimate
 			eps=1.e-6*np.abs(initial_estimate)+1.e-8
 			fun,grad=steady_state_log_likelihood(pp,*args)
-			my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args_here)\
-							   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args_here))/(2*eps[i]) for i in range(len(pp))])
+			my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
+							   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 			diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
 			if diff > 1.e-8:
 				raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
@@ -275,12 +274,11 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 			# test gradient against numerical difference if necessary
 			if test_gradient:
 
-				args_here=args[:-2]+(False,)+args[-1:]
 				pp=initial_estimate
 				eps=1.e-6*np.abs(initial_estimate)+1.e-8
 				fun,grad=steady_state_log_likelihood(pp,*args)
-				my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args_here)\
-								   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args_here))/(2*eps[i]) for i in range(len(pp))])
+				my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
+								   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 				diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
 				if diff > 1.e-8:
 					raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
@@ -313,6 +311,8 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 
 	""" function to plot summary of results for a specific gene """
 
+	import matplotlib
+	matplotlib.use('Agg')
 	from matplotlib import pyplot as plt
 
 	times=np.array(map(float,time_points))
@@ -321,7 +321,7 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 	def jitter():
 		return np.random.normal(loc=0,scale=.1*np.min(np.diff(times)),size=len(time_points))
 
-	cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','unlabeled-precursor','unlabeled-total']
+	cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','unlabeled-precursor','unlabeled-mature']
 	if use_ribo:
 		cols=cols[:4]+['ribo']+cols[4:]
 		nrates=4
@@ -360,7 +360,7 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 				ax[i].plot(times,pred_vals[i],linestyle=':',label='initial')
 
 	for i,c in enumerate(cols):
-		ax[i].set_title(c,size=10)
+		ax[i].set_title(c)
 		ax[i].set_xlabel('time')
 
 	ax[0].set_ylabel('expression')
@@ -383,13 +383,13 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 				ax[ndim+i].plot(times,p,linestyle=':',label='initial')
 
 	for i,t in enumerate(['synthesis','degradation','processing','translation'][:nrates]):
-		ax[ndim+i].set_title(t+' rate',size=10)
+		ax[ndim+i].set_title(t+' rate')
 		ax[ndim+i].set_xlabel('time')
 
 	ax[ndim].set_ylabel('log rate')
 	ax[ndim+nrates-1].legend(loc=2,frameon=False,prop={'size':10},bbox_to_anchor=(1.1,1))
 
-	fig.suptitle(title,size=10)
+	fig.suptitle(title)
 
 def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=.1, maxlevel=None, priors=None):
 
@@ -398,7 +398,7 @@ def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=.1, maxlevel=None, priors=N
 	time_points=np.unique(values.columns.get_level_values(2))
 	nreps=len(np.unique(values.columns.get_level_values(3)))
 
-	rna_cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','unlabeled-precursor','unlabeled-total']
+	rna_cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','unlabeled-precursor','unlabeled-mature']
 	ribo_cols=rna_cols[:4]+['ribo']+rna_cols[4:]
 
 	ndim=7
@@ -456,16 +456,15 @@ def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=.1, maxlevel=None, priors=N
 	if priors is None:
 		# initialize priors with some empirical data (use 45% reasonably expressed genes)
 		print >> sys.stderr, 'estimating empirical priors'
-		take_RNA=((values['mean','unlabeled-total'] > values['mean','unlabeled-total'].quantile(.5)) & \
-				  (values['mean','unlabeled-total'] < values['mean','unlabeled-total'].quantile(.95))).any(axis=1)
+		take_RNA=((values['mean','unlabeled-mature'] > values['mean','unlabeled-mature'].quantile(.5)) & \
+				  (values['mean','unlabeled-mature'] < values['mean','unlabeled-mature'].quantile(.95))).any(axis=1)
 		take_ribo=take_RNA & use_ribo & ((values['mean','ribo'] > values['mean','ribo'].quantile(.5)) & \
 										 (values['mean','ribo'] < values['mean','ribo'].quantile(.95))).any(axis=1)
-		log_a_est=np.log(values['mean','elu-total']/T)[take_RNA].values.flatten()
-		log_b_est=np.log(values['mean','elu-total']/T/
-						 (values['mean','unlabeled-total']-values['mean','unlabeled-precursor']))[take_RNA].values.flatten()
-		log_c_est=np.log(values['mean','elu-total']/T/\
+		log_a_est=np.log((values['mean','elu-mature']+values['mean','elu-precursor'])/T)[take_RNA].values.flatten()
+		log_b_est=np.log((values['mean','elu-mature']+values['mean','elu-precursor'])/T/values['mean','unlabeled-mature'])[take_RNA].values.flatten()
+		log_c_est=np.log((values['mean','elu-mature']+values['mean','elu-precursor'])/T/\
 						 values['mean','unlabeled-precursor'])[take_RNA].values.flatten()
-		log_d_est=np.log(values['mean','ribo']/(values['mean','unlabeled-total']-values['mean','unlabeled-precursor']))[take_ribo].values.flatten()
+		log_d_est=np.log(values['mean','ribo']/values['mean','unlabeled-mature'])[take_ribo].values.flatten()
 
 		model_priors=pd.DataFrame([trim_mean_std(x) for x in [log_a_est,log_b_est,log_c_est,log_d_est]],\
 								  columns=['mu','std'],index=['log_a0','log_b0','log_c0','log_d0'])
@@ -649,10 +648,14 @@ def collect_results (results, time_points, sig_level=0.01):
 
 	return pd.DataFrame.from_dict(output,orient='index')
 
-def correct_TPM (TPM, samples, gene_stats, do_plot=False):
+def correct_TPM (TPM, samples, gene_stats, fig_name=None):
 
-	if do_plot:
+	if fig_name is not None:
+		import matplotlib
+		matplotlib.use('Agg')
 		from matplotlib import pyplot as plt
+		fig=plt.figure(figsize=(8,3*len(samples)))
+		fig.subplots_adjust(bottom=.02,top=.98,hspace=.4,wspace=.3)
 
 	""" corrects 4sU incorporation bias and fixes library size normalization of TPM values """
 
@@ -666,18 +669,14 @@ def correct_TPM (TPM, samples, gene_stats, do_plot=False):
 
 	print >> sys.stderr, '   t =',
 
-	for sample in samples:
+	for n,sample in enumerate(samples):
 
 		t,r=sample.split('-')
 
-		if do_plot:
-			fig=plt.figure(figsize=(8,4))
-			fig.clf()
-
 		print >> sys.stderr, '{0} ({1})'.format(t,r),
 
-		log2_elu_ratio=np.log2(TPM['elu-mature',sample]/TPM['unlabeled-mature',sample])
-		log2_FT_ratio=np.log2(TPM['flowthrough-mature',sample]/TPM['unlabeled-mature',sample])
+		log2_elu_ratio=np.log2(TPM['elu-mature',sample]/TPM['unlabeled-mature',sample]).replace([np.inf,-np.inf],np.nan)
+		log2_FT_ratio=np.log2(TPM['flowthrough-mature',sample]/TPM['unlabeled-mature',sample]).replace([np.inf,-np.inf],np.nan)
 
 		log10_ucount=np.log10(1+gene_stats['exon_ucount'])
 		ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
@@ -686,15 +685,6 @@ def correct_TPM (TPM, samples, gene_stats, do_plot=False):
 																 frac=0.66,it=1,delta=.001*log10_ucount_range).T
 		interp_elu=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
 		log2_elu_ratio_no_bias=log2_elu_ratio-interp_elu(log10_ucount)
-
-		if do_plot:
-			ax=fig.add_subplot(121)
-			ax.hexbin(gene_stats['exon_ucount'][ok],log2_elu_ratio[ok],bins='log',extent=(0,5000,-2.5,2.5),lw=0)
-			ax.plot(10**np.arange(0,4,.1),interp_elu(np.arange(0,4,.1)),'r-')
-			ax.set_xlim([0,5000])
-			ax.set_title('n={0}'.format(ok.sum()),size=10)
-			ax.set_ylabel('log2 elu/total')
-			ax.set_xlabel('# U residues')
 
 		elu_percentiles=np.percentile(log2_elu_ratio_no_bias[ok].dropna(),[5,95])
 		FT_percentiles=np.percentile(log2_FT_ratio[ok].dropna(),[5,95])
@@ -706,71 +696,100 @@ def correct_TPM (TPM, samples, gene_stats, do_plot=False):
 		if intercept < 0 or slope > 0:
 			raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
 
-		if do_plot:
-			ax=fig.add_subplot(122)
-			ax.hexbin(2**log2_elu_ratio_no_bias,2**log2_FT_ratio,bins='log',lw=0,extent=(-.1,5,-.1,3))
-			ax.plot(np.arange(0,5,.01),intercept+slope*np.arange(0,5,.01),'r-')
-			ax.set_xlim([-.1,5])
-			ax.set_ylim([-.1,3])
-			ax.set_title('n={0}'.format(ok.sum()),size=10)
-			ax.set_xlabel('elu/total')
-			ax.set_ylabel('FT/total')
-
-			fig.suptitle(sample)
-
 		# corrected values for precursors
 		corrected_TPM[('unlabeled-precursor',t,r)]=TPM['unlabeled-precursor',sample]
 		corrected_TPM[('elu-precursor',t,r)]=TPM['elu-precursor',sample]*2**(-np.log2(-intercept/slope))
 		corrected_TPM[('flowthrough-precursor',t,r)]=TPM['flowthrough-precursor',sample]*2**(-np.log2(intercept))
 
-		# corrected values for total (mature+precursor) after correcting for 4sU incorporation bias in mature
-		corrected_TPM[('unlabeled-total',t,r)]=TPM['unlabeled-mature',sample]+corrected_TPM[('unlabeled-precursor',t,r)]
-		corrected_TPM[('elu-total',t,r)]=TPM['unlabeled-mature',sample]*2**(log2_elu_ratio_no_bias-np.log2(-intercept/slope))\
-										   +corrected_TPM[('elu-precursor',t,r)]
-		corrected_TPM[('flowthrough-total',t,r)]=TPM['unlabeled-mature',sample]*2**(log2_FT_ratio-np.log2(intercept))\
-											 +corrected_TPM[('flowthrough-precursor',t,r)]
+		# corrected values for mature after correcting for 4sU incorporation bias in mature
+		corrected_TPM[('unlabeled-mature',t,r)]=TPM['unlabeled-mature',sample]
+		corrected_TPM[('elu-mature',t,r)]=TPM['unlabeled-mature',sample]*2**(log2_elu_ratio_no_bias.fillna(0)-np.log2(-intercept/slope))
+		corrected_TPM[('flowthrough-mature',t,r)]=TPM['unlabeled-mature',sample]*2**(log2_FT_ratio.fillna(0)-np.log2(intercept))
 
 		# uncorrected values for ribo
 		corrected_TPM[('ribo',t,r)]=TPM['ribo',sample]
 
-	corrected_TPM.columns=pd.MultiIndex.from_tuples(corrected_TPM.columns)
+		if fig_name is not None:
 
-	if do_plot:
-		plt.show()
+			ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
+
+			ax=fig.add_subplot(len(samples),2,2*n+1)
+			ax.hexbin(gene_stats['exon_ucount'][ok],log2_elu_ratio[ok],bins='log',extent=(0,5000,-2,2.5),lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			ax.plot(10**np.arange(0,4,.1),interp_elu(np.arange(0,4,.1)),'r-')
+			ax.set_xlim([0,5000])
+			ax.set_ylim([-2,2.5])
+			ax.set_title('{0}'.format(sample,ok.sum()))
+			ax.set_ylabel('log2 elu/unlabeled')
+			ax.set_xlabel('# U residues')
+
+			ax=fig.add_subplot(len(samples),2,2*n+2)
+			ax.hexbin(2**log2_elu_ratio_no_bias[ok],2**log2_FT_ratio[ok],bins='log',lw=0,extent=(-.1,5,-.1,3),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			ax.plot(np.arange(0,5,.01),intercept+slope*np.arange(0,5,.01),'r-')
+			ax.set_xlim([-.1,5])
+			ax.set_ylim([-.1,3])
+			ax.set_title('{0}'.format(sample,ok.sum()))
+			ax.set_xlabel('elu/unlabeled')
+			ax.set_ylabel('FT/unlabeled')
+
+	corrected_TPM.columns=pd.MultiIndex.from_tuples(corrected_TPM.columns)
 
 	print >> sys.stderr, '\n'
 
+	if fig_name is not None:
+		print >> sys.stderr, '[correct_TPM] saving figure to {0}'.format(fig_name)
+		fig.savefig(fig_name)
+
 	return corrected_TPM
 
-def estimate_dispersion (TPM, cols, do_plot=False): 
+def estimate_dispersion (TPM, cols, fig_name=None, disp_weight=1.8):
 
-	""" estimates dispersion by simply smoothing the mean-variance plot taken across all samples to the columns given in vols """
+	""" estimates dispersion by a weighted average of the calculated std dev and a smoothened std dev from the mean-variance plot """
 
-	if do_plot:
+	if fig_name is not None:
+		import matplotlib
+		matplotlib.use('Agg')
 		from matplotlib import pyplot as plt
+		fig=plt.figure(figsize=(3*len(cols),3))
+		fig.subplots_adjust(left=.05,right=.98,hspace=.4,wspace=.3,bottom=.15)
 
 	std_TPM=[]
+	reps=TPM.columns.get_level_values(2).unique()
+	nreps=len(reps)
+
 	print >> sys.stderr, '\n[estimate_dispersion] averaging samples:\n   ',
-	for c in cols:
+	for n,c in enumerate(cols):
+
 		print >> sys.stderr, c, 
+		log10_std=np.log10(TPM[c].std(axis=1,level=0))
 		# perform lowess regression on log CV vs log mean
 		log10_means=np.log10(TPM[c].mean(axis=1,level=0))
-		log10_CV=np.log10(TPM[c].std(axis=1,level=0)/TPM[c].mean(axis=1,level=0))
+		log10_CV=log10_std-log10_means
 		ok=(np.isfinite(log10_means) & np.isfinite(log10_CV)).all(axis=1)
 		log10_mean_range=np.abs(log10_means[ok].max().max()-log10_means[ok].min().min())
 		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV[ok].values.flatten(),\
 																 log10_means[ok].values.flatten(),frac=0.2,it=1,delta=.01*log10_mean_range).T
-		interp=scipy.interpolate.interp1d(10**lowess[0],10**lowess[1],bounds_error=False)
-		std_TPM.append(TPM[c].apply(interp)*TPM[c])
-		if do_plot:
-			fig=plt.figure(figsize=(4,3))
-			fig.clf()
-			ax=fig.add_axes([.2,.25,.7,.65])
-			ax.hexbin(log10_means.values.flatten(),log10_CV.values.flatten(),bins='log',lw=0,extent=(-3,5,-4,1))
-			ax.plot(lowess[0],lowess[1],'r-')
+		# this interpolates log10 CV from log10 mean
+		interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
+		# get interpolated std dev
+		log10_std_smooth=interp(log10_means)+log10_means
+		# estimated std dev is weighted average of real and smoothened
+		log10_std_est=(1.-disp_weight/nreps)*log10_std+disp_weight*log10_std_smooth/nreps
+		# get regularized CV
+		log10_CV_est=log10_std_est-log10_means
+
+		# add estimated std dev for each replicate
+		std_TPM.append(pd.concat([10**log10_std_est]*nreps,axis=1,keys=reps).swaplevel(0,1,axis=1).sort_index(axis=1))
+
+		if fig_name is not None:
+
+			ax=fig.add_subplot(1,len(cols),n+1)
+			ax.hexbin(log10_means.values.flatten(),log10_CV.values.flatten(),bins='log',lw=0,extent=(-3,5,-4,1),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			# plot estimated values
+			ax.plot(log10_means.values.flatten()[::10],log10_CV_est.values.flatten()[::10],'c.',markersize=2)
+			ax.plot(np.arange(-3,5,.1),interp(np.arange(-3,5,.1)),'r-')
 			ax.set_xlim([-3,5])
 			ax.set_ylim([-4,1])
-			ax.set_title('{0}: n={1}'.format(c,ok.sum()),size=10)
+			ax.set_title('{0}'.format(c))
 			ax.set_xlabel('log10 mean')
 			ax.set_ylabel('log10 CV')
 
@@ -778,8 +797,9 @@ def estimate_dispersion (TPM, cols, do_plot=False):
 
 	print >> sys.stderr, '\n'
 
-	if do_plot:
-		plt.show()
+	if fig_name is not None:
+		print >> sys.stderr, '[estimate_dispersion] saving figure to {0}'.format(fig_name)
+		fig.savefig(fig_name)
 
 	return pd.concat([TPM,std_TPM],axis=1,keys=['mean','std']).sort_index(axis=1)
 
@@ -806,13 +826,14 @@ if __name__ == '__main__':
 	parser.add_option('-U','--unlabeled_exons',dest='unlabeled_exons',help="featureCounts output for unlabeled RNA mapped to exons")
 	parser.add_option('-t','--time_points',dest='time_points',help="comma-separated list of time points (integer or floating-point), MUST correspondg to the data columns in the featureCount outputs and be the same for all fractions")
 	parser.add_option('-T','--labeling_time',dest='T',help="labeling time",type=float)
-	parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix (default: RNAkira)")
-	parser.add_option('','--alpha',dest='alpha',help="FDR cutoff (default: 0.05)",default=0.05,type=float)
-	parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test (default: 5)",default=5,type=int)
-	parser.add_option('','--min_TPM_total',dest='min_TPM_total',help="min TPM for total (default: .1)",default=.1,type=float)
-	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor (default: .001)",default=.001,type=float)
-	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo (default: .1)",default=.1,type=float)
-	parser.add_option('','--do_plots',dest='do_plots',help="create plots for 4sU bias correction and normalization",action='store_true')
+	parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
+	parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05,type=float)
+	parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
+	parser.add_option('','--min_TPM_mature',dest='min_TPM_mature',help="min TPM for mature [.1]",default=.1,type=float)
+	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor [.001]",default=.001,type=float)
+	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo [.1]",default=.1,type=float)
+	parser.add_option('','--disp_weight',dest='disp_weight',help="weighting parameter for dispersion estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
+	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
 
 	options,args=parser.parse_args()
 
@@ -830,9 +851,9 @@ if __name__ == '__main__':
 
 	if options.input_TPM is not None:
 		
-		print >> sys.stderr, '\n[main] reading corrected TPM values from '+options.input_TPM
-		print >> sys.stderr, '       ignoring options -geEfFruU'
-		TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
+		print >> sys.stderr, '\n[main] reading TPM values from '+options.input_TPM
+		print >> sys.stderr, '       ignoring options -eEfFruU'
+		TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(2))
 
 	else:
 
@@ -859,7 +880,7 @@ if __name__ == '__main__':
 		print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
 		unlabeled_exons=get_RPK_from_featureCount(options.unlabeled_exons,samples)
 
-		print >> sys.stderr, "\n[main] merging count values and computing TPM using gene stats from "+options.gene_stats
+		print >> sys.stderr, "\n[main] merging count values and computing TPM"
 
 		# add up RPK values for different fractions (introns and exons), count missing entries as zero
 		elu_factor=elu_exons.add(elu_introns,fill_value=0).sum(axis=0)/1.e6
@@ -881,22 +902,22 @@ if __name__ == '__main__':
 		print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
 		TPM.to_csv(options.out_prefix+'_TPM.csv')
 
-		gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
+	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 
-		print >> sys.stderr, '\n[main] correcting TPM values'
+	print >> sys.stderr, '\n[main] correcting TPM values using gene stats from '+options.gene_stats
 
-		TPM=correct_TPM (TPM, samples, gene_stats, do_plot=options.do_plots)
+	TPM=correct_TPM (TPM, samples, gene_stats, fig_name=(None if options.no_plots else options.out_prefix+'_TPM_correction.pdf'))
 
-		print >> sys.stderr, '[main] saving corrected TPM values to '+options.out_prefix+'_corrected_TPM.csv'
-		TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
+	print >> sys.stderr, '[main] saving corrected TPM values to '+options.out_prefix+'_corrected_TPM.csv'
+	TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
 
 	print >> sys.stderr, '\n[main] estimating dispersion'
 
-	cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','ribo','unlabeled-precursor','unlabeled-total']
-	TPM=estimate_dispersion (TPM, cols, do_plot=options.do_plots)
+	cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
+	TPM=estimate_dispersion (TPM, cols, fig_name=(None if options.no_plots else options.out_prefix+'_dispersion.pdf'), disp_weight=options.disp_weight)
 
-	# select genes based on TPM cutoffs for total, precursor in any of the time points
-	ok=(TPM['mean','unlabeled-total'] > options.min_TPM_total).any(axis=1) &\
+	# select genes based on TPM cutoffs for mature, precursor in any of the time points
+	ok=(TPM['mean','unlabeled-mature'] > options.min_TPM_mature).any(axis=1) &\
 		(TPM['mean','unlabeled-precursor'] > options.min_TPM_precursor).any(axis=1)
 
 	# take only those genes

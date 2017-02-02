@@ -110,7 +110,7 @@ if options.values is not None:
 
 else:
 	
-	cols=['elu-precursor','elu-total','flowthrough-precursor','flowthrough-total','ribo','unlabeled-precursor','unlabeled-total']
+	cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
 
 	nGenes=len(true_gene_class)
 	genes=np.array(map(lambda x: '_'.join(x), zip(['gene']*nGenes,map(str,range(nGenes)),true_gene_class)))
