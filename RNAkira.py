@@ -391,7 +391,7 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 
 	fig.suptitle(title)
 
-def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=.1, maxlevel=None, priors=None):
+def RNAkira (values, T, sig_level=0.01, min_TPM_ribo=1, maxlevel=None, priors=None):
 
 	""" main routine in this package: given dataframe of TPM values and labeling time, estimates empirical priors and fits models of increasing complexity """
 
@@ -829,9 +829,9 @@ if __name__ == '__main__':
 	parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
 	parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05,type=float)
 	parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
-	parser.add_option('','--min_TPM_mature',dest='min_TPM_mature',help="min TPM for mature [.1]",default=.1,type=float)
-	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor [.001]",default=.001,type=float)
-	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo [.1]",default=.1,type=float)
+	parser.add_option('','--min_TPM_mature',dest='min_TPM_mature',help="min TPM for mature [1]",default=1,type=float)
+	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
+	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo [1]",default=1,type=float)
 	parser.add_option('','--disp_weight',dest='disp_weight',help="weighting parameter for dispersion estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
 	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
 
