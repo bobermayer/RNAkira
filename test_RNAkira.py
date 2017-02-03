@@ -100,6 +100,9 @@ if options.values is not None:
 	values=pd.read_csv(options.values,index_col=0,header=range(4))
 	values.columns=pd.MultiIndex.from_tuples([(c[0],c[1],c[2],int(c[3])) for c in values.columns.tolist()])
 
+	mean_values=values['mean']
+	std_values=values['std']
+
 	time_points=np.unique(zip(*values.columns.tolist())[2])
 	replicates=np.unique(zip(*values.columns.tolist())[3])
 	cols=np.unique(zip(*values.columns.tolist())[1])
@@ -119,7 +122,8 @@ else:
 
 	parameters_known=True
 	parameters={}
-	values={}
+	mean_values={}
+	std_values={}
 
 	print >> sys.stderr, '\n[test_RNAkira] drawing parameters and observations for {0} genes ({1} time points, {2} replicates)'.format(nGenes,len(time_points),len(replicates))
 	print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
@@ -155,7 +159,8 @@ else:
 			log_a,log_b,log_c,log_d=RNAkira.get_rates(time_points,pars)
 			
 		# now get random values for observations according to these rate parameters
-		vals=[]
+		mean_vals=[]
+		std_vals=[]
 
 		for i,t in enumerate(time_points):
 
@@ -164,25 +169,31 @@ else:
 			# use overdispersed gamma distribution (here: std = sqrt(mu + 2^(-ma) mu^(2-mb)))
 			std=sigma_f*np.sqrt(mu+2**(-ma)*mu**(2-mb))
 
-			vals.append([scipy.stats.gamma.rvs((mu[n]/std[n])**2,scale=std[n]**2/mu[n],size=len(replicates)) for n in range(len(mu))])
-			vals.append([np.ones(len(replicates))*std[n] for n in range(len(std))])
+			mean_vals.append([scipy.stats.gamma.rvs((mu[n]/std[n])**2,scale=std[n]**2/mu[n],size=len(replicates)) for n in range(len(mu))])
+			std_vals.append([np.ones(len(replicates))*std[n] for n in range(len(std))])
 
 		parameters[gene]=pars
-		values[gene]=np.array(vals).flatten()
+		mean_values[gene]=np.array(mean_vals).flatten()
+		std_values[gene]=np.array(std_vals).flatten()
 
-	values=pd.DataFrame.from_dict(values,orient='index')
+	mean_values=pd.DataFrame.from_dict(mean_values,orient='index')
+	mean_values.columns=pd.MultiIndex.from_tuples([(t,c,r) for t in time_points for c in cols for r in replicates])
+	mean_values=mean_values.reorder_levels([1,0,2],axis=1).sort_index(axis=1)
 
-	values.columns=pd.MultiIndex.from_tuples([(t,stat,c,r) for t in time_points for stat in ['mean','std'] for c in cols for r in replicates])
-	values=values.reorder_levels([1,2,0,3],axis=1).sort_index(axis=1)
+	std_values=pd.DataFrame.from_dict(std_values,orient='index')
+	std_values.columns=pd.MultiIndex.from_tuples([(t,c,r) for t in time_points for c in cols for r in replicates])
+	std_values=std_values.reorder_levels([1,0,2],axis=1).sort_index(axis=1)
 
-	if (values < 0).any().any():
+	NF=pd.DataFrame(1,index=mean_values.index,columns=mean_values.columns)
+
+	if (mean_values < 0).any().any() or (std_values < 0).any().any():
 		raise Exception('invalid random values!')
 
 	if options.outf is not None:
 		print >> sys.stderr, '[test_RNAkira] saving to '+options.outf
-		values.to_csv(options.outf)
+		pd.concat([mean_values,std_values],axis=1,keys=['mean','std']).to_csv(options.outf)
 
-results=RNAkira.RNAkira(values, T, sig_level=sig_level, min_TPM_ribo=0.01, maxlevel=options.maxlevel)
+results=RNAkira.RNAkira(mean_values, std_values, NF, T, sig_level=sig_level, min_TPM_ribo=0.01, maxlevel=options.maxlevel)
 
 output=RNAkira.collect_results(results, time_points, sig_level=sig_level)
 
@@ -198,7 +209,7 @@ if False:
 	np.random.shuffle(genes_to_plot)
 
 	for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-		RNAkira.plot_data_rates_fits(time_points,replicates,values.ix[gene,'mean'],T,\
+		RNAkira.plot_data_rates_fits(time_points,replicates,mean_values.ix[gene],T,\
 									 parameters[gene] if parameters_known else None,\
 									 results[gene],True,\
 									 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\

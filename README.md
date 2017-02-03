@@ -2,7 +2,7 @@
 
 RNAkira (RNA Kinetic Rate Analysis) is a tool to estimate synthesis, degradation, processing rates and translational efficiency. 
 using data from high-throughput sequencing of 4sU-labeled RNA (4sU-seq) and ribosome protected fragments (RPFs from Ribo-seq). 
-It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://bioinformatics.oxfordjournals.org/content/31/17/2829), but key differences are the inclusion of flowthrough data for normalization, ribo-seq data for estimates of translational efficiency, and the assumption of steady-state kinetics.
+It is conceptually related to other tools such as  [DRiLL](http://dx.doi.org/10.1016/j.cell.2014.11.015) or [INSPEcT](http://bioinformatics.oxfordjournals.org/content/31/17/2829), but key differences are the inclusion of flowthrough data for normalization, ribo-seq data for estimates of translational efficiency, the assumption of steady-state kinetics, and the use of an underlying negative binomial model.
 
 ## Prerequisites
 RNAkira runs on Python 2.7.11 with numpy (v1.11.1), scipy (v0.17.1), statsmodels (v0.8.0rc1) and pandas (v0.18.1), and twobitreader if prepare_annotation.py is used. Read counts for exonic and intronic regions are expected in [featureCounts](http://bioinf.wehi.edu.au/featureCounts/) output format, but TPM values can be supplied as well.
@@ -10,7 +10,7 @@ RNAkira runs on Python 2.7.11 with numpy (v1.11.1), scipy (v0.17.1), statsmodels
 ## Description
 The tool assumes standard RNA kinetics: precursor RNA *P* is born with synthesis rate *a* and destroyed with processing rate *c*, mature RNA *M* is produced by processing a precursor, translated to ribo *R* with efficiency *d* and destroyed with degradation rate *b*. 
 
-Precursor RNA is estimated from intronic RNA read counts, mature from exonic RNA read counts, and ribo from CDS RPF counts. For RNA, reads come in three fractions: newly synthesized (=elu), pre-existing (=flowthrough) and total (=unlabeled). TPM values are calculated for each sample, elu values are corrected for 4sU incorporation efficiency, and elu and flowthrough samples normalized using linear regression (see, e.g., [Dölken et al. RNA 2008](http://dx.doi.org/10.1261/rna.1136108) or [Schwannhäuser et al. Nature 2011](http://dx.doi.org/10.1038/nature10098)). RNAkira initially fits the steady-state solutions to the above kinetics at each time point separately using maximum likelihood with empirical Bayes priors estimated across genes and time points, and then performs model selection, starting with constant rates for the different time points and successively allowing additional linear changes to the (log) rates (= log fold changes) in a hierarchy of models (similar to INSPEcT). Models at different levels are compared and best models are selected using an FDR cutoff of alpha (default: 5%).
+Precursor RNA is estimated from intronic RNA read counts, mature from exonic RNA read counts, and ribo from CDS RPF counts. For RNA, reads come in three fractions: newly synthesized (=elu), pre-existing (=flowthrough) and total (=unlabeled). TPM values are calculated for each sample, elu values are corrected for 4sU incorporation efficiency, and elu and flowthrough samples normalized using linear regression (see, e.g., [Dölken et al. RNA 2008](http://dx.doi.org/10.1261/rna.1136108) or [Schwannhäuser et al. Nature 2011](http://dx.doi.org/10.1038/nature10098)). Dispersion values are estimated from the averaged mean-CV plot. RNAkira initially fits the steady-state solutions to the above kinetics at each time point separately using maximum likelihood in a negative binomial model with empirical Bayes priors estimated across genes and time points. It then performs model selection, starting with constant rates for the different time points and successively allowing additional linear changes to the (log) rates (= log fold changes) in a hierarchy of models (similar to INSPEcT). Models at different levels are compared and best models are selected using an FDR cutoff of alpha (default: 5%).
 
 ## Usage
 
@@ -55,7 +55,7 @@ python RNAkira.py \
     -i TPM.csv 
 ```
 
-The file ``TPM.csv`` is expected as a pandas-style dataframe with hierarchical column labels: ``elu-precursor, elu-mature, flowthrough-precursor, flowthrough-mature, ribo, unlabeled-precursor, unlabeled-mature`` on the first level and ``t1-Rep1,t1-Rep2,...,t2-Rep1,t2-Rep2,...`` on the second.
+However, in this case the negative binomial model cannot be used, and a gaussian model is used instead. The file ``TPM.csv`` is expected as a pandas-style dataframe with hierarchical column labels: ``elu-precursor, elu-mature, flowthrough-precursor, flowthrough-mature, ribo, unlabeled-precursor, unlabeled-mature`` on the first level, ``t1,t2,...`` on the second, and ``Rep1,Rep2,...`` on the third.
 
 Additional options can be explored using ``python RNAkira.py -h``
 
