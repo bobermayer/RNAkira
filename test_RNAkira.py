@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 from collections import defaultdict,OrderedDict
+import itertools 
 import RNAkira
 from matplotlib import pyplot as plt
 from optparse import OptionParser
@@ -11,30 +12,33 @@ from optparse import OptionParser
 plt.ion()
 np.random.seed(0)
 
+# ignore warning about division by zero or over-/underflows
+np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
+
 # change here if you want to test other scenarios
 # these are prior estimates similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.3,1.2,0.1,.01,.01,.01,.01]),std=np.array([1.3,1.,1.5,.6,.01,.005,.005,.005])),\
-						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
+true_priors=pd.DataFrame(dict(mu=np.array([4.6,-2.3,1.2,0.1,.01,.01,.01,.01]),\
+                                  std=np.array([1.3,1,1.5,.6,.01,.005,.005,.005])),\
+                             index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
-# distribute models over genes, make sure most genes don't change for multiple testing correction to work
-true_gene_class=['ribo_0']*2000+\
-	['ribo_a']*50+\
-	['ribo_b']*50+\
-	['ribo_c']*50+\
-	['ribo_d']*50+\
-	['ribo_ab']*20+\
-	['ribo_ac']*20+\
-	['ribo_ad']*20+\
-	['ribo_bc']*20+\
-	['ribo_bd']*20+\
-	['ribo_cd']*20+\
-	['ribo_abc']*15+\
-	['ribo_acd']*15+\
-	['ribo_abd']*15+\
-	['ribo_bcd']*15+\
-	['ribo_abcd']*20+\
-	['ribo_all']*100
-
+# distribute models over genes, make sure most genes don't change for multiple testing correction to work (other model types than MPR don't really work here)
+true_gene_class=['MPR_0']*2000+\
+	['MPR_a']*25+\
+	['MPR_b']*25+\
+	['MPR_c']*25+\
+	['MPR_d']*25+\
+	['MPR_ab']*10+\
+	['MPR_ac']*10+\
+	['MPR_ad']*10+\
+	['MPR_bc']*10+\
+	['MPR_bd']*10+\
+	['MPR_cd']*10+\
+	['MPR_abc']*15+\
+	['MPR_acd']*15+\
+	['MPR_abd']*15+\
+	['MPR_bcd']*15+\
+	['MPR_abcd']*10+\
+	['MPR_all']*50
 
 # define time points
 time_points=['0','12','24','36','48']
@@ -45,49 +49,60 @@ replicates=map(str,range(10))
 T=1
 # noise level (decrease for testing)
 sigma_f=1
-# parameters of mean-variance relationship: std = sqrt(mu + 2**(-ma)*mu**(2-mb))
-ma,mb=5.,0.
+# parameters of dispersion curve
+slope,intercept=0.01,5
 
 # model definition (same as in RNAkira)
 
-rna_pars=['log_a0','log_b0','log_c0']
-ribo_pars=rna_pars+['log_d0']
-models=OrderedDict([(0,OrderedDict([('ribo_all',(ribo_pars,[])),\
-									('rna_all',(['log_a0','log_b0','log_c0'],[]))])),\
-					(1,OrderedDict([('ribo_0',(ribo_pars,['ribo_all'])),\
-									('rna_0',(['log_a0','log_b0','log_c0'],['rna_all']))])),\
-					(2,OrderedDict([('ribo_a',(ribo_pars+['alpha'],['ribo_0'])),\
-									('ribo_b',(ribo_pars+['beta'],['ribo_0'])),\
-									('ribo_c',(ribo_pars+['gamma'],['ribo_0'])),\
-									('ribo_d',(ribo_pars+['delta'],['ribo_0'])),\
-									('rna_a',(rna_pars+['alpha'],['rna_0'])),\
-									('rna_b',(rna_pars+['beta'],['rna_0'])),\
-									('rna_c',(rna_pars+['gamma'],['rna_0']))])),\
-					(3,OrderedDict([('ribo_ab',(ribo_pars+['alpha','beta'],['ribo_a','ribo_b'])),\
-									('ribo_ac',(ribo_pars+['alpha','gamma'],['ribo_a','ribo_c'])),\
-									('ribo_ad',(ribo_pars+['alpha','delta'],['ribo_a','ribo_d'])),\
-									('ribo_bc',(ribo_pars+['beta','gamma'],['ribo_b','ribo_c'])),\
-									('ribo_bd',(ribo_pars+['beta','delta'],['ribo_b','ribo_d'])),\
-									('ribo_cd',(ribo_pars+['gamma','delta'],['ribo_c','ribo_d'])),\
-									('rna_ab',(rna_pars+['alpha','beta'],['rna_a','rna_b'])),\
-									('rna_ac',(rna_pars+['alpha','gamma'],['rna_a','rna_c'])),\
-									('rna_bc',(rna_pars+['beta','gamma'],['rna_b','rna_c']))])),\
-					(4,OrderedDict([('ribo_abc',(ribo_pars+['alpha','beta','gamma'],['ribo_ab','ribo_ac','ribo_bc'])),\
-									('ribo_abd',(ribo_pars+['alpha','beta','delta'],['ribo_ab','ribo_ad','ribo_bd'])),\
-									('ribo_acd',(ribo_pars+['alpha','gamma','delta'],['ribo_ac','ribo_ad','ribo_cd'])),\
-									('ribo_bcd',(ribo_pars+['beta','gamma','delta'],['ribo_bc','ribo_bd','ribo_cd'])),\
-									('rna_abc',(rna_pars+['alpha','beta','gamma'],['rna_ab','rna_ac','rna_bc']))])),\
-					(5,OrderedDict([('ribo_abcd',(ribo_pars+['alpha','beta','gamma','delta'],['ribo_abc','ribo_abd','ribo_acd','ribo_bcd']))]))])
+mature_pars=['log_a0','log_b0']
+precursor_pars=['log_c0']
+ribo_pars=['log_d0']
+nlevels=6
+model_types=['MPR','MR','MP','M']
+
+fixed_pars=dict(MPR=mature_pars+precursor_pars+ribo_pars,\
+				MR=mature_pars+ribo_pars,\
+				MP=mature_pars+precursor_pars,\
+				M=mature_pars)
+
+variable_pars=dict(MPR=['alpha','beta','gamma','delta'],\
+				   MR=['alpha','beta','delta'],\
+				   MP=['alpha','beta','gamma'],\
+				   M=['alpha','beta'])
+
+par_code=dict(alpha='a',beta='b',gamma='c',delta='d')
+
+# define nested hierarchy of models (model name, model parameters, parent models)
+models=OrderedDict()
+for level in range(nlevels):
+	level_models=OrderedDict()
+	for mt in model_types:
+		if level==0:
+			level_models.update({mt+'_all': (fixed_pars[mt],[])})
+		elif level==1:
+			level_models.update({mt+'_0': (fixed_pars[mt],[mt+'_all'])})
+		else:
+			fp=fixed_pars[mt]
+			vp=variable_pars[mt]
+			# get all combination of the variable pars
+			for par_comb in itertools.combinations(vp,level-1):
+				# find parent model that use a subset of these parameters
+				if level==2:
+					parent_models=[mt+'_0']
+				else:
+					parent_models=[mt+'_'+''.join(par_code[p] for p in x) for x in itertools.combinations(vp,level-2) if set(x) < set(par_comb)]
+				level_models.update({mt+'_'+''.join(par_code[p] for p in par_comb): (fixed_pars[mt]+list(par_comb),parent_models)})
+	models.update({level: level_models})
 
 nlevels=len(models)
 model_pars=dict((m,v[0]) for l in range(nlevels) for m,v in models[l].iteritems())
 
 parser=OptionParser()
-parser.add_option('-i','--values',dest='values',help="file with simulated TPM (created by test_RNAkira.py)")
-parser.add_option('-o','--outf',dest='outf',help="save simulated TPM to this file")
-parser.add_option('-T','--labeling_time',dest='T',help="labeling time (default: 1)", default=1)
-parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test (default: 5)",default=5,type=int)
-parser.add_option('','--alpha',dest='alpha',help="FDR cutoff (default: 0.05)",default=0.05)
+parser.add_option('-i','--values',dest='values',help="file with simulated counts (created by test_RNAkira.py)")
+parser.add_option('-o','--outf',dest='outf',help="save simulated counts to this file")
+parser.add_option('-T','--labeling_time',dest='T',help="labeling time [1]", default=1)
+parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
+parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05)
 
 options,args=parser.parse_args()
 
@@ -97,20 +112,20 @@ T=float(options.T)
 if options.values is not None:
 
 	print >> sys.stderr, '\n[test_RNAkira] reading simulated data from '+options.values
-	values=pd.read_csv(options.values,index_col=0,header=range(4))
-	values.columns=pd.MultiIndex.from_tuples([(c[0],c[1],c[2],int(c[3])) for c in values.columns.tolist()])
+	counts=pd.read_csv(options.values,index_col=0,header=range(3))
+	counts.columns=pd.MultiIndex.from_tuples([(c[0],c[1],int(c[2])) for c in values.columns.tolist()])
 
-	time_points=np.unique(zip(*values.columns.tolist())[2])
-	replicates=np.unique(zip(*values.columns.tolist())[3])
-	cols=np.unique(zip(*values.columns.tolist())[1])
-	genes=values.index.values
+	time_points=np.unique(zip(*counts.columns.tolist())[2])
+	replicates=np.unique(zip(*counts.columns.tolist())[3])
+	cols=np.unique(zip(*counts.columns.tolist())[1])
+	genes=counts.index.counts
 	nGenes=len(genes)
 	true_gene_class=pd.Series(np.array(['_'.join(g.split('_')[2:]) for g in genes]),index=genes)
 	parameters_known=False
 
 else:
 	
-	cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','ribo','unlabeled-precursor','unlabeled-mature']
+	cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
 	nGenes=len(true_gene_class)
 	genes=np.array(map(lambda x: '_'.join(x), zip(['gene']*nGenes,map(str,range(nGenes)),true_gene_class)))
@@ -119,7 +134,7 @@ else:
 
 	parameters_known=True
 	parameters={}
-	values={}
+	counts={}
 
 	print >> sys.stderr, '\n[test_RNAkira] drawing parameters and observations for {0} genes ({1} time points, {2} replicates)'.format(nGenes,len(time_points),len(replicates))
 	print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
@@ -127,7 +142,7 @@ else:
 	for gene in genes:
 
 		model=true_gene_class[gene]
-		if model=='ribo_all':
+		if model=='MPR_all':
 			log_a=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_a0','mu'],true_priors.ix['log_a0','std']),\
 									   .5*true_priors.ix['log_a0','std'],size=len(time_points))
 			log_b=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_b0','mu'],true_priors.ix['log_b0','std']),\
@@ -152,44 +167,60 @@ else:
 			if 'delta' in pars:
 				pars['delta']=np.random.choice([+1,-1])*pars['delta']
 				pars['log_d0']-=pars['delta']*np.mean(times)
-			log_a,log_b,log_c,log_d=RNAkira.get_rates(time_points,pars)
+			rates=RNAkira.get_rates(time_points,pars)
+			log_a,log_b=rates[:2]
+			if 'log_c0' in pars:
+				log_c=rates[2]
+			if 'log_d0' in pars:
+				log_d=rates[-1]
 			
 		# now get random values for observations according to these rate parameters
-		vals=[]
+		cnts=[]
 
 		for i,t in enumerate(time_points):
 
-			mu=RNAkira.get_steady_state_values([log_a[i],log_b[i],log_c[i],log_d[i]],T,use_ribo=True)
+			mu=1.e-8+RNAkira.get_steady_state_values([r[i] for r in rates],T,use_precursor='P' in model, use_ribo='R' in model)
 
-			# use overdispersed gamma distribution (here: std = sqrt(mu + 2^(-ma) mu^(2-mb)))
-			std=sigma_f*np.sqrt(mu+2**(-ma)*mu**(2-mb))
+			# get dispersion from trend
+			disp=(intercept-1)/mu+slope
 
-			vals.append([scipy.stats.gamma.rvs((mu[n]/std[n])**2,scale=std[n]**2/mu[n],size=len(replicates)) for n in range(len(mu))])
-			vals.append([np.ones(len(replicates))*std[n] for n in range(len(std))])
+			cnts.append([scipy.stats.nbinom.rvs(1./disp[n],1./(1.+disp[n]*mu[n]),size=len(replicates)) for n in range(len(mu))])
 
 		parameters[gene]=pars
-		values[gene]=np.array(vals).flatten()
+		counts[gene]=np.array(cnts).flatten()
 
-	values=pd.DataFrame.from_dict(values,orient='index')
-
-	values.columns=pd.MultiIndex.from_tuples([(t,stat,c,r) for t in time_points for stat in ['mean','std'] for c in cols for r in replicates])
-	values=values.reorder_levels([1,2,0,3],axis=1).sort_index(axis=1)
-
-	if (values < 0).any().any():
-		raise Exception('invalid random values!')
+	counts=pd.DataFrame.from_dict(counts,orient='index')
+	counts.columns=pd.MultiIndex.from_tuples([(t,c,r) for t in time_points for c in cols for r in replicates])
+	counts=counts.reorder_levels([1,0,2],axis=1).sort_index(axis=1)
 
 	if options.outf is not None:
 		print >> sys.stderr, '[test_RNAkira] saving to '+options.outf
-		values.to_csv(options.outf)
+		counts.to_csv(options.outf)
 
-results=RNAkira.RNAkira(values, T, sig_level=sig_level, min_TPM_ribo=0.01, maxlevel=options.maxlevel)
+# all genes have the same length
+LF=pd.Series(1,index=counts.index)
+# normalize by "sequencing depth"
+elu_factor=counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
+flowthrough_factor=counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
+unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
+ribo_factor=counts['ribo'].sum(axis=0)/1.e6
+# size factors
+SF=pd.concat([elu_factor,elu_factor,\
+			  flowthrough_factor,flowthrough_factor,\
+			  ribo_factor,\
+			  unlabeled_factor,unlabeled_factor],axis=0,keys=cols)
+
+TPM=counts.divide(LF,axis=0,level=0).divide(SF,axis=1).sort_index(axis=1)
+stddev=RNAkira.estimate_stddev (TPM, fig_name='test.pdf')
+
+results=RNAkira.RNAkira(TPM, stddev, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel)#, priors=true_priors)
 
 output=RNAkira.collect_results(results, time_points, sig_level=sig_level)
 
 print >> sys.stderr, '\n[test_RNAkira] evaluating performance'
 
 inferred_gene_class=output.ix[genes,'best_model']
-inferred_gene_class[output.ix[genes,'initial_qval'] < .05]='ribo_all'
+inferred_gene_class[output.ix[genes,'initial_qval'] < .05]='MPR_all'
 
 # use this if you want to plot specific examples
 if False:
@@ -198,7 +229,7 @@ if False:
 	np.random.shuffle(genes_to_plot)
 
 	for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-		RNAkira.plot_data_rates_fits(time_points,replicates,values.ix[gene,'mean'],T,\
+		RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
 									 parameters[gene] if parameters_known else None,\
 									 results[gene],True,\
 									 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
