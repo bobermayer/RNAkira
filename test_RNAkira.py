@@ -12,12 +12,16 @@ from optparse import OptionParser
 plt.ion()
 np.random.seed(0)
 
+# ignore warning about division by zero or over-/underflows
+# np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
+
 # change here if you want to test other scenarios
 # these are prior estimates similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([.6,-2.3,1.2,0.1,.01,.01,.01,.01]),std=np.array([1.3,1.,1.5,.6,.01,.005,.005,.005])),\
-						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
+true_priors=pd.DataFrame(dict(mu=np.array([4.6,-2.3,1.2,0.1,.01,.01,.01,.01]),\
+                                  std=np.array([1.3,1,1.5,.6,.01,.005,.005,.005])),\
+                             index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
-# distribute models over genes, make sure most genes don't change for multiple testing correction to work
+# distribute models over genes, make sure most genes don't change for multiple testing correction to work (other model types than MPR don't really work here)
 true_gene_class=['MPR_0']*2000+\
 	['MPR_a']*25+\
 	['MPR_b']*25+\
@@ -96,9 +100,10 @@ model_pars=dict((m,v[0]) for l in range(nlevels) for m,v in models[l].iteritems(
 parser=OptionParser()
 parser.add_option('-i','--values',dest='values',help="file with simulated counts (created by test_RNAkira.py)")
 parser.add_option('-o','--outf',dest='outf',help="save simulated counts to this file")
-parser.add_option('-T','--labeling_time',dest='T',help="labeling time (default: 1)", default=1)
-parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test (default: 5)",default=5,type=int)
-parser.add_option('','--alpha',dest='alpha',help="FDR cutoff (default: 0.05)",default=0.05)
+parser.add_option('-T','--labeling_time',dest='T',help="labeling time [1]", default=1)
+parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
+parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05)
+parser.add_option('','--statsmodel',dest='statsmodel',help="statsmodel [gaussian]",default='gaussian')
 
 options,args=parser.parse_args()
 
@@ -207,10 +212,11 @@ SF=pd.concat([elu_factor,elu_factor,\
 			  unlabeled_factor,unlabeled_factor],axis=0,keys=cols)
 
 TPM=counts.divide(LF,axis=0,level=0).divide(SF,axis=1).sort_index(axis=1)
-NF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
-disp=RNAkira.estimate_dispersion (TPM, fig_name='test.pdf', disp_weight=1.5)
+CF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
+NF=CF.divide(LF,axis=0,level=0).divide(SF,axis=1).fillna(1)
+disp=RNAkira.estimate_dispersion (counts*NF.divide(np.exp(np.log(NF).mean(axis=1)),axis=0), fig_name='test.pdf', disp_weight=1.5)
 
-results=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_TPM_ribo=1, min_TPM_precursor=1, maxlevel=options.maxlevel)
+results=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_TPM_ribo=.1, min_TPM_precursor=.01, maxlevel=options.maxlevel, statsmodel=options.statsmodel, priors=true_priors)
 
 output=RNAkira.collect_results(results, time_points, sig_level=sig_level)
 

@@ -7,6 +7,7 @@ import scipy.stats
 import scipy.interpolate
 import scipy.optimize
 import statsmodels.nonparametric.smoothers_lowess
+import statsmodels.regression.linear_model
 from optparse import OptionParser
 from collections import defaultdict,OrderedDict,Counter
 
@@ -254,9 +255,11 @@ def steady_state_log_likelihood (x, vals, disp, nf, T, time_points, prior_mu, pr
 
 		if statsmodel=='gaussian':
 			diff=vals[i]-exp_mean/nf[i]
-			std=vals[i]*(1.+disp[i]*vals[i])
-			fun+=np.sum(-.5*(diff/std)**2-.5*np.log(2.*np.pi)-np.log(std))
-			if use_deriv:
+			# dispersion is the same for all replicates, so we can avg std to avoid division by zero
+			std=np.mean(vals[i]*(1.+disp[i]*vals[i]))
+			if std > 0:
+				fun+=np.sum(-.5*(diff/std)**2-.5*np.log(2.*np.pi)-np.log(std))
+			if use_deriv and std > 0:
 				grad+=np.dot(exp_mean_deriv,np.sum(diff/std**2/nf[i],axis=0))
 
 		elif statsmodel=='nbinom':
@@ -267,6 +270,9 @@ def steady_state_log_likelihood (x, vals, disp, nf, T, time_points, prior_mu, pr
 			if use_deriv:
 				tmp=(vals[i]-nn*disp[i]*mu)/(exp_mean*(1.+disp[i]*mu))
 				grad+=np.dot(exp_mean_deriv,np.sum(tmp/nf[i],axis=0))
+
+	if fun is np.nan:
+		raise Exception("invalid value in steady_state_log_likelihood!")
 
 	if use_deriv:
 		# return negative log likelihood and gradient
@@ -280,6 +286,8 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 	""" fits a specific model to data """
 
 	test_gradient=True
+	if not min_args['jac']:
+		test_gradient=False
 
 	nrates=2+use_precursor+use_ribo
 
@@ -309,7 +317,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 			my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
 							   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 			diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-			if diff > 1.e-5:
+			if diff > 1.e-8:
 				raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 		# perform minimization
@@ -359,7 +367,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 				my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
 								   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 				diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-				if diff > 1.e-5:
+				if diff > 1.e-8:
 					raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 			res=scipy.optimize.minimize(steady_state_log_likelihood, \
@@ -412,10 +420,8 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 	print >> sys.stderr, '\n[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
 	print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates and {2} model'.format(len(time_points),nreps,statsmodel)
 
-	if statsmodel=='gaussian':
-		min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
-	elif statsmodel=='nbinom':
-		min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
+	#min_args=dict(method='L-BFGS-B',jac=False,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
+	min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
 
 	if maxlevel is not None:
 		nlevels=maxlevel+1
@@ -534,7 +540,11 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 			results[gene][level]=result
 			nfits+=1
 
+		if priors is not None:
+			break
+
 		model_pars,_=models[0]['MPR_all']
+		nvalid=[sum(results[gene][level]['success'] and x in results[gene][level]['est_pars'] for gene in genes) for x in model_pars]
 		new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][x] for gene in genes \
 														 if results[gene][level]['success'] and x in results[gene][level]['est_pars']])) for x in model_pars],\
 								columns=['mu','std'],index=model_pars)
@@ -544,7 +554,7 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 
 		prior_diff=((model_priors-new_priors)**2).sum().sum()/(new_priors**2).sum().sum()
 
-		print >> sys.stderr, '   iter {0}: {1} fits, prior_diff: {2:.2g}'.format(niter,nfits,prior_diff)
+		print >> sys.stderr, '   iter {0}: {1} fits ({3}/{4}/{5}/{6} valid), prior_diff: {2:.2g}'.format(niter,nfits,prior_diff,*nvalid)
 
 		if prior_diff > 1.e-3 and niter < 10:
 			model_priors=new_priors
@@ -789,8 +799,14 @@ def estimate_dispersion (TPM, fig_name=None, disp_weight=1.8):
 		var_TPM=TPM[c].var(axis=1)
 		# get dispersion trend for genes with positive values
 		ok=(mean_TPM > 0) & (mean_TPM < var_TPM)
-		slope,intercept,_,_,_=scipy.stats.linregress(mean_TPM.values[ok],(var_TPM/mean_TPM).values[ok])
+		#slope,intercept,_,_,_=scipy.stats.linregress(mean_TPM[ok],(var_TPM/mean_TPM)[ok])
+		y=(var_TPM/mean_TPM)[ok]
+		X=np.c_[mean_TPM[ok],np.ones(ok.sum())]
+		wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
+		slope,intercept=wls.fit().params
+        # there's a global normalization factor difference between var and mean, but for small mean we should have var=mean
 		disp_smooth=(intercept-1)/mean_TPM+slope
+		disp_smooth[disp_smooth < 0]=0
 		if disp_smooth.isnull().any().any():
 			raise Exception('invalid disp smooth')
 		disp_act=(var_TPM-mean_TPM)/mean_TPM**2
