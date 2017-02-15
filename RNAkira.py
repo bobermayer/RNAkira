@@ -271,7 +271,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 
 	""" fits a specific model to data """
 
-	test_gradient=True
+	test_gradient=False
 
 	nrates=2+use_precursor+use_ribo
 
@@ -376,7 +376,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 
 	return result
 
-def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, results, use_ribo, title='', priors=None, sig_level=0.01):
+def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, use_precursor, use_ribo, title='', priors=None, sig_level=0.01):
 
 	""" function to plot summary of results for a specific gene """
 
@@ -390,13 +390,16 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 	def jitter():
 		return np.random.normal(loc=0,scale=.1*np.min(np.diff(times)),size=len(time_points))
 
-	cols=['elu-precursor','elu-mature','flowthrough-precursor','flowthrough-mature','unlabeled-precursor','unlabeled-mature']
+	cols=['elu-mature','flowthrough-mature','unlabeled-mature']
+	rates=['synthesis','degradation']
+	if use_precursor: 
+		cols+=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+		rates+=['processing']
 	if use_ribo:
-		cols=cols[:4]+['ribo']+cols[4:]
-		nrates=4
-	else:
-		nrates=3
+		cols+=['ribo']
+		rates+=['translation']
 
+	nrates=len(rates)
 	ndim=len(cols)
 
 	fig=plt.figure(figsize=(15,6))
@@ -409,15 +412,15 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 
 	for i in range(ndim):
 		for r in replicates:
-			ax[i].plot(times,obs_vals[cols[i]].xs(r,level=1),'ko',label='_nolegend_',mfc='none')
+			ax[i].plot(times,TPM[cols[i]].xs(r,level=1),'ko',label='_nolegend_',mfc='none')
 
 	if parameters is not None:
-		exp_vals=get_steady_state_values(get_rates(time_points,parameters),T,use_ribo)
+		exp_vals=get_steady_state_values(get_rates(time_points,parameters),T,use_precursor,use_ribo)
 		for i in range(ndim):
 			ax[i].plot(times,exp_vals[i],'k-',label='theo. mean')
 
 	for level,vals in enumerate(results):
-		pred_vals=get_steady_state_values(get_rates(time_points,vals['est_pars']),T,use_ribo)
+		pred_vals=get_steady_state_values(get_rates(time_points,vals['est_pars']),T,use_precursor,use_ribo)
 		for i in range(ndim):
 			if level > 1:
 				qval=vals['LRT-q']
@@ -451,8 +454,8 @@ def plot_data_rates_fits (time_points, replicates, obs_vals, T, parameters, resu
 			else:
 				ax[ndim+i].plot(times,p,linestyle=':',label='initial')
 
-	for i,t in enumerate(['synthesis','degradation','processing','translation'][:nrates]):
-		ax[ndim+i].set_title(t+' rate')
+	for i,r in enumerate(rates):
+		ax[ndim+i].set_title(r)
 		ax[ndim+i].set_xlabel('time')
 
 	ax[ndim].set_ylabel('log rate')
@@ -713,7 +716,8 @@ def collect_results (results, time_points, sig_level=0.01):
 		tmp+=[('initial_logL',initial_fit['L']),\
 			  ('initial_fit_success',initial_fit['success']),\
 			  ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
-			  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan)]
+			  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
+			  ('initial_model',initial_fit['model'])]
 
 		# take best significant model or constant otherwise
 		best_fit=filter(lambda x: (x['model'].endswith('0') or x['LRT-q'] < sig_level),res)[-1]
@@ -732,8 +736,8 @@ def collect_results (results, time_points, sig_level=0.01):
 			 ('translation_log2FC',pars['delta']/np.log(2) if 'delta' in pars else 0),\
 			 ('modeled_logL',best_fit['L']),\
 			 ('modeled_fit_success',best_fit['success']),\
-			 ('modeled_pval',best_fit['LRT-p'] if best_fit['model']!='0' else np.nan),\
-			 ('modeled_qval',best_fit['LRT-q'] if best_fit['model']!='0' else np.nan),\
+			 ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
+			 ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
 			 ('best_model',best_fit['model'])]
 
 		output[gene]=OrderedDict(tmp)

@@ -17,38 +17,36 @@ np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 
 # change here if you want to test other scenarios
 # these are prior estimates similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([4.6,-2.3,1.2,0.1,.01,.01,.01,.01]),\
-                                  std=np.array([1.3,1,1.5,.6,.01,.005,.005,.005])),\
-                             index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
+true_priors=pd.DataFrame(dict(mu=np.array([2,-3,1,0.0,.00,.00,.00,.00]),\
+							  std=np.array([2,1,1,.5,.01,.005,.005,.005])),\
+						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
 # distribute models over genes, make sure most genes don't change for multiple testing correction to work (other model types than MPR don't really work here)
 true_gene_class=['MPR_0']*2000+\
-	['MPR_a']*25+\
-	['MPR_b']*25+\
-	['MPR_c']*25+\
-	['MPR_d']*25+\
-	['MPR_ab']*10+\
-	['MPR_ac']*10+\
-	['MPR_ad']*10+\
-	['MPR_bc']*10+\
-	['MPR_bd']*10+\
-	['MPR_cd']*10+\
-	['MPR_abc']*15+\
-	['MPR_acd']*15+\
-	['MPR_abd']*15+\
-	['MPR_bcd']*15+\
-	['MPR_abcd']*10+\
-	['MPR_all']*50
+	['MPR_a']*50+\
+	['MPR_b']*50+\
+	['MPR_c']*50+\
+	['MPR_d']*50+\
+	['MPR_ab']*20+\
+	['MPR_ac']*20+\
+	['MPR_ad']*20+\
+	['MPR_bc']*20+\
+	['MPR_bd']*20+\
+	['MPR_cd']*20+\
+	['MPR_abc']*10+\
+	['MPR_acd']*10+\
+	['MPR_abd']*10+\
+	['MPR_bcd']*10+\
+	['MPR_abcd']*20+\
+	['MPR_all']*100
 
 # define time points
 time_points=['0','12','24','36','48']
 times=map(float,time_points)
 # define number of replicates
-replicates=map(str,range(10))
+replicates=map(str,range(3))
 # labeling time
 T=1
-# noise level (decrease for testing)
-sigma_f=1
 # parameters of dispersion curve
 slope,intercept=0.01,5
 
@@ -187,11 +185,10 @@ else:
 			cnts.append([scipy.stats.nbinom.rvs(1./disp[n],1./(1.+disp[n]*mu[n]),size=len(replicates)) for n in range(len(mu))])
 
 		parameters[gene]=pars
-		counts[gene]=np.array(cnts).flatten()
+		counts[gene]=np.array(cnts).transpose([1,0,2]).flatten()
 
 	counts=pd.DataFrame.from_dict(counts,orient='index')
-	counts.columns=pd.MultiIndex.from_tuples([(t,c,r) for t in time_points for c in cols for r in replicates])
-	counts=counts.reorder_levels([1,0,2],axis=1).sort_index(axis=1)
+	counts.columns=pd.MultiIndex.from_product([cols,time_points,replicates])
 
 	if options.outf is not None:
 		print >> sys.stderr, '[test_RNAkira] saving to '+options.outf
@@ -199,39 +196,42 @@ else:
 
 # all genes have the same length
 LF=pd.Series(1,index=counts.index)
-# normalize by "sequencing depth"
-elu_factor=counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
-flowthrough_factor=counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
+# normalize by "sequencing depth" but keep relative proportions of elu, flowthrough and unlabeled
+elu_flowthrough_factor=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)+\
+						counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
 unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
 ribo_factor=counts['ribo'].sum(axis=0)/1.e6
 # size factors
-SF=pd.concat([elu_factor,elu_factor,\
-			  flowthrough_factor,flowthrough_factor,\
-			  ribo_factor,\
-			  unlabeled_factor,unlabeled_factor],axis=0,keys=cols)
+SF=pd.concat([elu_flowthrough_factor,elu_flowthrough_factor,unlabeled_factor,\
+			  elu_flowthrough_factor,elu_flowthrough_factor,unlabeled_factor,\
+			  ribo_factor],axis=0,keys=cols)
 
-TPM=counts.divide(LF,axis=0,level=0).divide(SF,axis=1).sort_index(axis=1)
+TPM=counts.divide(LF,axis=0,level=0).divide(SF,axis=1)
+
 stddev=RNAkira.estimate_stddev (TPM, fig_name='test.pdf')
 
-results=RNAkira.RNAkira(TPM, stddev, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel)#, priors=true_priors)
+results=RNAkira.RNAkira(TPM, stddev, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel)
 
 output=RNAkira.collect_results(results, time_points, sig_level=sig_level)
 
 print >> sys.stderr, '\n[test_RNAkira] evaluating performance'
 
 inferred_gene_class=output.ix[genes,'best_model']
-inferred_gene_class[output.ix[genes,'initial_qval'] < .05]='MPR_all'
+inferred_gene_class[output.ix[genes,'initial_qval'] < .05]=output.ix[genes,'initial_model'][output.ix[genes,'initial_qval'] < .05]
 
 # use this if you want to plot specific examples
-if False:
+if True:
 
 	genes_to_plot=genes[np.where(inferred_gene_class!=true_gene_class)[0]]
 	np.random.shuffle(genes_to_plot)
 
 	for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
+		pcorr=pd.Series(dict(log_a0=-np.log(SF.mean()*LF.mean()),log_b0=0,log_c0=0,log_d0=0))
 		RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
-									 parameters[gene] if parameters_known else None,\
-									 results[gene],True,\
+									 parameters[gene]-pcorr if parameters_known else None,\
+									 results[gene],\
+									 'P' in inferred_gene_class[gene],\
+									 'R' in inferred_gene_class[gene],\
 									 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
 									 priors=None,sig_level=sig_level)
 
@@ -248,17 +248,17 @@ stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under
 title='{0} genes, {1} time points, {2} replicates\n{3}'.format(nGenes,len(time_points),len(replicates),stats)
 print >> sys.stderr, stats
 		
-fig=plt.figure(figsize=(5,5.5))
+fig=plt.figure(figsize=(8,9))
 fig.clf()
 
 ax=fig.add_axes([.2,.2,.75,.65])
 ax.imshow(np.log2(1+matches),origin='lower',cmap=plt.cm.Blues,vmin=0,vmax=np.log2(nGenes))
 ax.set_xticks(range(len(mods)))
-ax.set_xticklabels(mods,rotation=90,va='top',ha='center')
+ax.set_xticklabels(mods,rotation=90,va='top',ha='center',size=8)
 ax.set_xlabel('inferred model')
 ax.set_ylabel('true model')
 ax.set_yticks(range(len(mods)))
-ax.set_yticklabels(mods)
+ax.set_yticklabels(mods,size=8)
 for i in range(len(mods)):
 	for j in range(len(mods)):
 		if matches[i,j] > 0:
