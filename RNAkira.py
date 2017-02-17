@@ -33,7 +33,7 @@ def p_adjust_bh(p):
 	q[~ok] = np.nan
 	return q
 
-def get_steady_state_values (x,T,use_precursor,use_ribo,use_deriv=False):
+def get_steady_state_values (x, T, use_precursor, use_ribo, use_deriv=False):
 
 	""" given synthesis, degradation, processing rates and translation efficiencies x=(a,b,c,d) and labeling time T
 	returns instantaneous steady-state values for elu, flowthrough, unlabeled mature
@@ -267,11 +267,13 @@ def steady_state_log_likelihood (x, vals, std, T, time_points, prior_mu, prior_s
 		# return negative log likelihood
 		return -fun
 
-def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, model_pars, use_precursor, use_ribo, min_args):
+def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, model_pars, min_args):
 
 	""" fits a specific model to data """
 
 	test_gradient=False
+	use_precursor='P' in model
+	use_ribo='R' in model
 
 	nrates=2+use_precursor+use_ribo
 
@@ -314,6 +316,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 		result=dict(est_pars=pd.Series(res.x,index=model_pars),\
 					L=-res.fun,\
 					success=res.success,\
+					message=res.message,\
 					npars=len(model_pars),
 					model=model)
 
@@ -323,6 +326,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 		x=[]
 		L=0
 		npars=0
+		messages=[]
 		success=True
 
 		if parent is None:
@@ -358,7 +362,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 										**min_args)
 
 			x.append(res.x)
-
+			messages.append(res.message)
 			L+=-res.fun
 			success=success & res.success
 			npars+=len(model_pars)
@@ -366,6 +370,7 @@ def fit_model (obs_mean, obs_std, T, time_points, model_priors, parent, model, m
 		result=dict(est_pars=pd.DataFrame(x,columns=model_pars,index=time_points),\
 					L=L,\
 					success=success,\
+					message='; '.join(messages),\
 					npars=npars,\
 					model=model)
 
@@ -596,7 +601,7 @@ def RNAkira (vals, stddev, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxle
 			vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
 			stddev_here=stddev.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
 
-			result=fit_model (vals_here, stddev_here, T, time_points, model_priors, None, model, model_pars, use_precursor[gene], use_ribo[gene], min_args)
+			result=fit_model (vals_here, stddev_here, T, time_points, model_priors, None, model, model_pars, min_args)
 
 			results[gene][level]=result
 			nfits+=1
@@ -657,7 +662,7 @@ def RNAkira (vals, stddev, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxle
 				if level > 1 and not parent['LRT-q'] < sig_level:
 					continue
 
-				result=fit_model (vals_here, stddev_here, T, time_points, model_priors, parent, model, model_pars, use_precursor[gene], use_ribo[gene], min_args)
+				result=fit_model (vals_here, stddev_here, T, time_points, model_priors, parent, model, model_pars, min_args)
 
 				model_results[gene]=result
 				level_results[gene][model]=result
@@ -668,16 +673,16 @@ def RNAkira (vals, stddev, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxle
 			for gene,q in qvals.iteritems():
 				model_results[gene]['LRT-q']=q
 			nsig=sum(q < sig_level for q in qvals.values())
-			if level > 1:
-				print >> sys.stderr, '   model: {0}, {1} fits ({2} improved at FDR {3:.2g})'.format(model,nfits,nsig,sig_level)
-			else:
-				print >> sys.stderr, '   model: {0}, {1} fits ({2} insufficient at FDR {3:.2g})'.format(model,nfits,nsig,sig_level)
+			message='   model: {0}, {1} fits'.format(model,nfits)
+			if nfits > 0:
+				message +=' ({0} {2} at FDR {1:.2g})'.format(nsig,sig_level,'improved' if level > 1 else 'insufficient')
+			print >> sys.stderr, message
 
 		print >> sys.stderr, '   selecting best models at level {0}'.format(level)
 		for gene in genes:
 			all_results[gene][level]=level_results[gene]
 			if len(level_results[gene]) > 0:
-				results[gene][level]=min(level_results[gene].values(),key=lambda x: x['LRT-q'])
+				results[gene][level]=max(level_results[gene].values(),key=lambda x: x['L'])
 
 	for gene in genes:
 		max_level=max(results[gene].keys())
