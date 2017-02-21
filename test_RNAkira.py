@@ -13,32 +13,32 @@ plt.ion()
 np.random.seed(0)
 
 # ignore warning about division by zero or over-/underflows
-# np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
+np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 
 # change here if you want to test other scenarios
 # these are prior estimates similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([4.6,-2.3,1.2,0.1,.01,.01,.01,.01]),\
-                                  std=np.array([1.3,1,1.5,.6,.01,.005,.005,.005])),\
-                             index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
+true_priors=pd.DataFrame(dict(mu=np.array([2,-4,-.7,.0,.02,.02,.02,.02]),\
+							  std=np.array([2,1.6,1,.7,.01,.005,.005,.005])),\
+						 index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
 # distribute models over genes, make sure most genes don't change for multiple testing correction to work (other model types than MPR don't really work here)
 true_gene_class=['MPR_0']*2000+\
-	['MPR_a']*25+\
-	['MPR_b']*25+\
-	['MPR_c']*25+\
-	['MPR_d']*25+\
-	['MPR_ab']*10+\
-	['MPR_ac']*10+\
-	['MPR_ad']*10+\
-	['MPR_bc']*10+\
-	['MPR_bd']*10+\
-	['MPR_cd']*10+\
+	['MPR_a']*50+\
+	['MPR_b']*50+\
+	['MPR_c']*50+\
+	['MPR_d']*50+\
+	['MPR_ab']*20+\
+	['MPR_ac']*20+\
+	['MPR_ad']*20+\
+	['MPR_bc']*20+\
+	['MPR_bd']*20+\
+	['MPR_cd']*20+\
 	['MPR_abc']*15+\
 	['MPR_acd']*15+\
 	['MPR_abd']*15+\
 	['MPR_bcd']*15+\
-	['MPR_abcd']*10+\
-	['MPR_all']*50
+	['MPR_abcd']*20+\
+	['MPR_all']*100
 
 # define time points
 time_points=['0','12','24','36','48']
@@ -47,8 +47,6 @@ times=map(float,time_points)
 replicates=map(str,range(10))
 # labeling time
 T=1
-# noise level (decrease for testing)
-sigma_f=1
 # parameters of dispersion curve
 slope,intercept=0.01,5
 
@@ -70,7 +68,7 @@ variable_pars=dict(MPR=['alpha','beta','gamma','delta'],\
 				   MP=['alpha','beta','gamma'],\
 				   M=['alpha','beta'])
 
-par_code=dict(alpha='a',beta='b',gamma='c',delta='d')
+par_code=dict(alpha='a',beta='b',gamma='c',delta='d') 
 
 # define nested hierarchy of models (model name, model parameters, parent models)
 models=OrderedDict()
@@ -96,6 +94,8 @@ for level in range(nlevels):
 
 nlevels=len(models)
 model_pars=dict((m,v[0]) for l in range(nlevels) for m,v in models[l].iteritems())
+
+min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
 
 parser=OptionParser()
 parser.add_option('-i','--values',dest='values',help="file with simulated counts (created by test_RNAkira.py)")
@@ -136,23 +136,20 @@ else:
 	parameters_known=True
 	parameters={}
 	counts={}
+	#diff={}
 
 	print >> sys.stderr, '\n[test_RNAkira] drawing parameters and observations for {0} genes ({1} time points, {2} replicates)'.format(nGenes,len(time_points),len(replicates))
 	print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
 
-	for gene in genes:
+	for ng,gene in enumerate(genes):
+
+		print >> sys.stderr, '[test_RNAkira] {0} genes initialized\r'.format(ng+1),
 
 		model=true_gene_class[gene]
 		if model=='MPR_all':
-			log_a=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_a0','mu'],true_priors.ix['log_a0','std']),\
-									   .5*true_priors.ix['log_a0','std'],size=len(time_points))
-			log_b=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_b0','mu'],true_priors.ix['log_b0','std']),\
-									   .5*true_priors.ix['log_b0','std'],size=len(time_points))
-			log_c=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_c0','mu'],true_priors.ix['log_c0','std']),\
-									   .5*true_priors.ix['log_c0','std'],size=len(time_points))
-			log_d=scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix['log_d0','mu'],true_priors.ix['log_d0','std']),\
-									   .5*true_priors.ix['log_d0','std'],size=len(time_points))
-			pars=pd.DataFrame([log_a,log_b,log_c,log_d],columns=time_points,index=['log_a0','log_b0','log_c0','log_d0']).T
+			rates=[scipy.stats.norm.rvs(scipy.stats.norm.rvs(true_priors.ix[v,'mu'],true_priors.ix[v,'std']),\
+										.5*true_priors.ix[v,'std'],size=len(time_points)) for v in model_pars[model]]
+			pars=pd.DataFrame(rates,columns=time_points,index=['log_a0','log_b0','log_c0','log_d0']).T
 		else:
 			pars=pd.Series(np.array([scipy.stats.norm.rvs(true_priors.ix[v,'mu'],true_priors.ix[v,'std']) for v in model_pars[model]]),index=model_pars[model])
 			# add random up- or down-movement and subtract linear trend from baseline
@@ -169,61 +166,79 @@ else:
 				pars['delta']=np.random.choice([+1,-1])*pars['delta']
 				pars['log_d0']-=pars['delta']*np.mean(times)
 			rates=RNAkira.get_rates(time_points,pars)
-			log_a,log_b=rates[:2]
-			if 'log_c0' in pars:
-				log_c=rates[2]
-			if 'log_d0' in pars:
-				log_d=rates[-1]
 			
 		# now get random values for observations according to these rate parameters
-		cnts=[]
-		disp=[]
+		cnts=pd.Series(index=pd.MultiIndex.from_product([cols,time_points,replicates]))
+		#stddev=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
+		#disp=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
 
 		for i,t in enumerate(time_points):
 
 			mu=1.e-8+RNAkira.get_steady_state_values([r[i] for r in rates],T,use_precursor='P' in model, use_ribo='R' in model)
 
-			# get dispersion from trend
-			disp=(intercept-1)/mu+slope
+			d=(intercept-1)/mu+slope
 
-			cnts.append([scipy.stats.nbinom.rvs(1./disp[n],1./(1.+disp[n]*mu[n]),size=len(replicates)) for n in range(len(mu))])
+			for n in range(len(mu)):
+				cnts[cols[n],t]=scipy.stats.nbinom.rvs(1./d[n],1./(1.+d[n]*mu[n]),size=len(replicates))
+				#disp[cols[n],t]=d[n]
+				#stddev[cols[n],t]=np.sqrt(mu[n]*(1.+d[n]*mu[n]))
 
 		parameters[gene]=pars
-		counts[gene]=np.array(cnts).flatten()
+		counts[gene]=cnts
+
+		if False:
+
+			cnts_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(replicates),len(cols)))
+			stddev_here=stddev.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
+			disp_here=disp.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
+			nf_here=np.ones_like(cnts_here)
+
+			res_true=pd.DataFrame(rates,index=['log_a0','log_b0','log_c0','log_d0'],columns=time_points).T
+			res_gaussian=RNAkira.fit_model(cnts_here,stddev_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'gaussian',min_args)
+			res_nbinom=RNAkira.fit_model(cnts_here,disp_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'nbinom',min_args)
+
+			diff[gene]=dict(gaussian=((res_true-res_gaussian['est_pars'])**2).mean().mean(),nbinom=((res_true-res_nbinom['est_pars'])**2).mean().mean())
+
+	print >> sys.stderr, ''
 
 	counts=pd.DataFrame.from_dict(counts,orient='index')
-	counts.columns=pd.MultiIndex.from_tuples([(t,c,r) for t in time_points for c in cols for r in replicates])
-	counts=counts.reorder_levels([1,0,2],axis=1).sort_index(axis=1)
-
+	#diff=pd.DataFrame.from_dict(diff,orient='index')
+	
 	if options.outf is not None:
 		print >> sys.stderr, '[test_RNAkira] saving to '+options.outf
 		counts.to_csv(options.outf)
 
+# all genes have the same length
 LF=pd.Series(1,index=counts.index)
-elu_factor=counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
-flowthrough_factor=counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
+# normalize by "sequencing depth"
+elu_flowthrough_factor=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)+\
+						counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
 unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
 ribo_factor=counts['ribo'].sum(axis=0)/1.e6
+# one global size factor to strictly keep relative proportions
+SF=pd.concat([elu_flowthrough_factor,elu_flowthrough_factor,unlabeled_factor,\
+			  elu_flowthrough_factor,elu_flowthrough_factor,unlabeled_factor,\
+			  ribo_factor],axis=0,keys=cols)
 
-# size factors
-SF=pd.concat([elu_factor,elu_factor,\
-			  flowthrough_factor,flowthrough_factor,\
-			  ribo_factor,\
-			  unlabeled_factor,unlabeled_factor],axis=0,keys=cols)
-
-TPM=counts.divide(LF,axis=0,level=0).divide(SF,axis=1).sort_index(axis=1)
 CF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
 NF=CF.divide(LF,axis=0,level=0).divide(SF,axis=1).fillna(1)
-disp=RNAkira.estimate_dispersion (counts*NF.divide(np.exp(np.log(NF).mean(axis=1)),axis=0), fig_name='test.pdf', disp_weight=1.5)
+NF1=pd.DataFrame(1,index=NF.index,columns=NF.columns)
 
-results=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_TPM_ribo=.1, min_TPM_precursor=.01, maxlevel=options.maxlevel, statsmodel=options.statsmodel, priors=true_priors)
+if options.statsmodel=='gaussian':
+	TPM=counts.multiply(NF)
+	stddev=RNAkira.estimate_stddev (TPM)
+	#results=RNAkira.RNAkira(counts, stddev, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel=options.statsmodel)
+	results=RNAkira.RNAkira(TPM, stddev, NF1, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel=options.statsmodel)
+else:
+	disp=RNAkira.estimate_dispersion (counts*NF.divide(np.exp(np.log(NF).mean(axis=1)),axis=0))
+	results=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
 output=RNAkira.collect_results(results, time_points, sig_level=sig_level)
 
 print >> sys.stderr, '\n[test_RNAkira] evaluating performance'
 
 inferred_gene_class=output.ix[genes,'best_model']
-inferred_gene_class[output.ix[genes,'initial_qval'] < .05]='ribo_all'
+inferred_gene_class[output.ix[genes,'initial_qval'] < .05]=output.ix[genes,'initial_model'][output.ix[genes,'initial_qval'] < .05]
 
 # use this if you want to plot specific examples
 if False:
@@ -232,25 +247,30 @@ if False:
 	np.random.shuffle(genes_to_plot)
 
 	for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-		RNAkira.plot_data_rates_fits(time_points,replicates,mean_values.ix[gene],T,\
-									 parameters[gene] if parameters_known else None,\
-									 results[gene],True,\
+		pcorr=pd.Series(dict(log_a0=np.log(SF.mean()*LF.mean()),log_b0=0,log_c0=0,log_d0=0))
+		RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
+									 parameters[gene]-pcorr if parameters_known else None,\
+									 results[gene],\
+									 'P' in inferred_gene_class[gene],\
+									 'R' in inferred_gene_class[gene],\
 									 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
 									 priors=None,sig_level=sig_level)
 
-mods=[m for lev in [1,2,3,4,5,0] for m in models[lev] if 'rna' not in m]
-matches=np.array([[np.sum((true_gene_class==m1) & (inferred_gene_class==m2)) for m2 in mods] for m1 in mods])
+tgc=np.array([m.split('_')[1] for m in true_gene_class])
+igc=np.array([m.split('_')[1] for m in inferred_gene_class])
+mods=[s for lev in [1,2,3,4,5,0] for s in set([m.split('_')[1] for m in models[lev]])]
+matches=np.array([[np.sum((tgc==m1) & (igc==m2)) for m2 in mods] for m1 in mods])
 
 nexact=np.sum(np.diag(matches))
 nover=np.sum(np.triu(matches,1))
-nlim=sum(true_gene_class!='all')
+nlim=sum(tgc!='all')
 nunder=np.sum(np.tril(matches,-1))
-ntarget=sum(true_gene_class!='0')
+ntarget=sum(tgc!='0')
 
 stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under-classifications ({5:.1f}%)'.format(nexact,100*nexact/float(nGenes),nover,100*nover/float(nlim),nunder,100*nunder/float(ntarget))
 title='{0} genes, {1} time points, {2} replicates\n{3}'.format(nGenes,len(time_points),len(replicates),stats)
 print >> sys.stderr, stats
-		
+
 fig=plt.figure(figsize=(5,5.5))
 fig.clf()
 
@@ -269,3 +289,17 @@ for i in range(len(mods)):
 
 ax.set_title(title,size=10)
 
+pdf=pd.DataFrame([pd.DataFrame(RNAkira.get_rates(time_points,parameters[gene]),columns=time_points,index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
+pdf['initial_synthesis']-=np.log(SF.mean()*LF.mean())
+pdf.columns=[c[0]+'_t'+c[1] for c in pdf.columns.tolist()]
+diff=np.abs(np.log(output.ix[:,:len(time_points)*4])-pdf)
+
+fig=plt.figure(figsize=(5,4))
+fig.clf()
+
+ax=fig.add_axes([.15,.15,.75,.75])
+ax.hist([np.log10(diff.ix[:,n*len(time_points):(n+1)*len(time_points)].dropna().values.flatten()) for n in range(4)],bins=np.arange(-5,2,.1),histtype='step',log=True,label=['synthesis','degradation','processing','translation'])
+ax.set_xlabel('log10 rel. error')
+ax.set_ylabel('counts')
+ax.legend(loc=2)
+ax.set_title('{0} genes, {1} time points, {2} replicates'.format(nGenes,len(time_points),len(replicates)),size=10)

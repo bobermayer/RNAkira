@@ -34,7 +34,7 @@ def p_adjust_bh(p):
 	q[~ok] = np.nan
 	return q
 
-def get_steady_state_values (x,T,use_precursor,use_ribo,use_deriv=False):
+def get_steady_state_values (x, T, use_precursor, use_ribo, use_deriv=False):
 
 	""" given synthesis, degradation, processing rates and translation efficiencies x=(a,b,c,d) and labeling time T
 	returns instantaneous steady-state values for elu, flowthrough, unlabeled mature
@@ -178,7 +178,7 @@ def get_rates(time_points, pars):
 	return rates
 
 		
-def steady_state_log_likelihood (x, vals, disp, nf, T, time_points, prior_mu, prior_std, model_pars, use_precursor, use_ribo, statsmodel, use_deriv):
+def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, prior_std, model_pars, use_precursor, use_ribo, statsmodel, use_deriv):
 
 	""" log-likelihood function for difference between expected and observed values, including all priors """
 
@@ -248,28 +248,26 @@ def steady_state_log_likelihood (x, vals, disp, nf, T, time_points, prior_mu, pr
 				exp_mean_deriv.append(exp_mean_deriv[2]*t)
 			if 'delta' in model_pars:
 				exp_mean_deriv.append(exp_mean_deriv[nrates-1]*t)
-
 		else:
 
 			exp_mean=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo)
 
 		if statsmodel=='gaussian':
+			# here var is stddev
 			diff=vals[i]-exp_mean/nf[i]
-			# dispersion is the same for all replicates, so we can avg std to avoid division by zero
-			std=np.mean(vals[i]*(1.+disp[i]*vals[i]))
-			if std > 0:
-				fun+=np.sum(-.5*(diff/std)**2-.5*np.log(2.*np.pi)-np.log(std))
-			if use_deriv and std > 0:
-				grad+=np.dot(exp_mean_deriv,np.sum(diff/std**2/nf[i],axis=0))
+			fun+=np.sum(-.5*(diff/var[i])**2-.5*np.log(2.*np.pi)-np.log(var[i]))
+			if use_deriv:
+				grad+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2/nf[i],axis=0))
 
 		elif statsmodel=='nbinom':
+			# here var is dispersion
 			mu=exp_mean/nf[i]
-			nn=1./disp[i]
-			pp=1./(1.+disp[i]*mu)
+			nn=1./var[i]
+			pp=1./(1.+var[i]*mu)
 			fun+=np.sum(scipy.stats.nbinom.logpmf(vals[i],nn,pp))
 			if use_deriv:
-				tmp=(vals[i]-nn*disp[i]*mu)/(exp_mean*(1.+disp[i]*mu))
-				grad+=np.dot(exp_mean_deriv,np.sum(tmp/nf[i],axis=0))
+				tmp=(vals[i]-nn*var[i]*mu)/(exp_mean*(1.+var[i]*mu))
+				grad+=np.dot(exp_mean_deriv,np.sum(tmp,axis=0))
 
 	if fun is np.nan:
 		raise Exception("invalid value in steady_state_log_likelihood!")
@@ -281,13 +279,13 @@ def steady_state_log_likelihood (x, vals, disp, nf, T, time_points, prior_mu, pr
 		# return negative log likelihood
 		return -fun
 
-def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, model_pars, use_precursor, use_ribo, statsmodel, min_args):
+def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model_pars, statsmodel, min_args):
 
 	""" fits a specific model to data """
 
-	test_gradient=True
-	if not min_args['jac']:
-		test_gradient=False
+	test_gradient=False
+	use_precursor='P' in model
+	use_ribo='R' in model
 
 	nrates=2+use_precursor+use_ribo
 
@@ -305,8 +303,8 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 			initial_estimate=np.concatenate([model_priors['mu'].values,[0]*(len(model_pars)-nrates)])
 
 		# arguments to minimization
-		args=(vals, disp, nf, T, time_points, model_priors['mu'].values[:nrates], model_priors['std'].values[:nrates],\
-			  model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
+		args=(vals, var, nf, T, time_points, model_priors['mu'].values[:nrates], 
+			  model_priors['std'].values[:nrates], model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
 
 		# test gradient against numerical difference if necessary
 		if test_gradient:
@@ -318,7 +316,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 							   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 			diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
 			if diff > 1.e-8:
-				raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
+				raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 		# perform minimization
 		res=scipy.optimize.minimize(steady_state_log_likelihood, \
@@ -340,6 +338,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 		x=[]
 		L=0
 		npars=0
+		messages=[]
 		success=True
 		messages=[]
 
@@ -355,8 +354,8 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 
 			initial_estimate=np.array([lr[i] for lr in log_rates])
 
-			args=(vals[i,None], disp[i,None], nf[i,None], T, [t], model_priors['mu'].values[:nrates], model_priors['std'].values[:nrates],\
-				  model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
+			args=(vals[i,None], var[i,None], nf[i,None], T, [t], model_priors['mu'].values[:nrates], \
+				  model_priors['std'].values[:nrates], model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
 
 			# test gradient against numerical difference if necessary
 			if test_gradient:
@@ -368,7 +367,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 								   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 				diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
 				if diff > 1.e-8:
-					raise Exception('\n!!! gradient diff: {0:.3e}'.format(diff))
+					raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 			res=scipy.optimize.minimize(steady_state_log_likelihood, \
 										initial_estimate,\
@@ -376,7 +375,7 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 										**min_args)
 
 			x.append(res.x)
-
+			messages.append(res.message)
 			L+=-res.fun
 			success=success & res.success
 			messages.append(res.message)
@@ -385,21 +384,96 @@ def fit_model (vals, disp, nf, T, time_points, model_priors, parent, model, mode
 		result=dict(est_pars=pd.DataFrame(x,columns=model_pars,index=time_points),\
 					L=L,\
 					success=success,\
-					message='|'.join(messages),\
+					message='; '.join(messages),\
 					npars=npars,\
 					model=model)
 
 	if parent is not None:
 		# calculate p-value from LRT test using chi2 distribution
-		#pval=scipy.stats.chisqprob(2*np.abs(result['L']-parent['L']),np.abs(result['npars']-parent['npars']))
 		pval=scipy.stats.chi2.sf(2*np.abs(result['L']-parent['L']),np.abs(result['npars']-parent['npars']))
 		result['LRT-p']=(pval if np.isfinite(pval) else np.nan)
 
 	return result
 
-def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_ribo=1, maxlevel=None, priors=None, statsmodel='gaussian'):
+def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, use_precursor, use_ribo, title='', priors=None, sig_level=0.01):
 
-	""" main routine in this package: given dataframe of TPM values, dispersions, normalization factors and labeling time T,
+	""" function to plot summary of results for a specific gene """
+
+	import matplotlib
+	matplotlib.use('Agg')
+	from matplotlib import pyplot as plt
+
+	times=np.array(map(float,time_points))
+	ntimes=len(times)
+
+	def jitter():
+		return np.random.normal(loc=0,scale=.1*np.min(np.diff(times)),size=len(time_points))
+
+	cols=['elu-mature','flowthrough-mature','unlabeled-mature']
+	rates=['synthesis','degradation']
+	if use_precursor: 
+		cols+=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+		rates+=['processing']
+	if use_ribo:
+		cols+=['ribo']
+		rates+=['translation']
+
+	nrates=len(rates)
+	ndim=len(cols)
+
+	# first plot data and fits to data
+
+	for i in range(ndim):
+		for r in replicates:
+			ax[i].plot(times,TPM[cols[i]].xs(r,level=1),'ko',label='_nolegend_',mfc='none')
+
+	if parameters is not None:
+		exp_vals=get_steady_state_values(get_rates(time_points,parameters),T,use_precursor,use_ribo)
+		for i in range(ndim):
+			ax[i].plot(times,exp_vals[i],'k-',label='theo. mean')
+
+	for level,vals in enumerate(results):
+		pred_vals=get_steady_state_values(get_rates(time_points,vals['est_pars']),T,use_precursor,use_ribo)
+		for i in range(ndim):
+			if level > 1:
+				qval=vals['LRT-q']
+				ax[i].plot(times,pred_vals[i],linestyle=('-' if qval < sig_level else '--'),\
+						   label='{0} (q={1:.2g})'.format(vals['model'],qval))
+			elif level==1:
+				ax[i].plot(times,pred_vals[i],linestyle='-', label='{0}'.format(vals['model']))
+			else:
+				ax[i].plot(times,pred_vals[i],linestyle=':',label='initial')
+
+	for i,c in enumerate(cols):
+		ax[i].set_title(c)
+		ax[i].set_xlabel('time')
+
+	ax[0].set_ylabel('expression')
+
+	# then plot rates and fits to rates
+	if parameters is not None:
+		for i,p in enumerate(get_rates(time_points, parameters)):
+			ax[ndim+i].plot(times,p,'k.-',label='true')
+
+	if priors is not None:
+		for i in range(nrates):
+			ax[ndim+i].fill_between(times,np.ones(ntimes)*(priors.ix[i,'mu']-1.96*priors.ix[i,'std']),\
+								 y2=np.ones(ntimes)*(priors.ix[i,'mu']+1.96*priors.ix[i,'std']),color='Gray',alpha=.25,label='95% prior')
+	for level,vals in enumerate(results):
+		for i,p in enumerate(get_rates(time_points,vals['est_pars'])):
+			qval=vals['LRT-q']
+			if level >= 1:
+				ax[ndim+i].plot(times,p,linestyle=('-' if qval < sig_level else '--'),label='{0} (q={1:.2g})'.format(vals['model'],qval))
+			else:
+				ax[ndim+i].plot(times,p,linestyle=':',label='initial')
+
+	for i,r in enumerate(rates):
+		ax[ndim+i].set_title(r)
+		ax[ndim+i].set_xlabel('time')
+
+def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxlevel=None, priors=None, statsmodel='gaussian'):
+
+	""" main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
 	    estimates empirical priors and fits models of increasing complexity """
 
 	genes=vals.index
@@ -409,15 +483,15 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 	ndim=7
 	TPM=vals*NF
 
-	use_precursor=(TPM['unlabeled-precursor'] > min_TPM_precursor).any(axis=1)
-	use_ribo=(TPM['ribo'] > min_TPM_ribo).any(axis=1)
+	use_precursor=(TPM['unlabeled-precursor'] > min_precursor).any(axis=1)
+	use_ribo=(TPM['ribo'] > min_ribo).any(axis=1)
 
 	# these are the features to use depending on cutoffs
 	mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
 	precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
 	ribo_cols=['ribo']
 
-	print >> sys.stderr, '\n[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
+	print >> sys.stderr, '[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
 	print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates and {2} model'.format(len(time_points),nreps,statsmodel)
 
 	#min_args=dict(method='L-BFGS-B',jac=False,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
@@ -528,14 +602,12 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 
 			model_pars,parent_models=models[level][model]
 			
-			# make numpy arrays out of vals, disp and NF for computational efficiency (therefore we need equal number of replicates for each time point!)
+			# make numpy arrays out of vals, var and NF for computational efficiency (therefore we need equal number of replicates for each time point!)
 			vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-			disp_here=disp.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
+			var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
 			nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-			# re-normalize nf to make geometric mean = 1
-			# nf_here=nf_here/np.exp(np.log(nf_here).mean())
 
-			result=fit_model (vals_here, disp_here, nf_here, T, time_points, model_priors, None, model, model_pars, use_precursor[gene], use_ribo[gene], statsmodel, min_args)
+			result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors, None, model, model_pars, statsmodel, min_args)
 
 			results[gene][level]=result
 			nfits+=1
@@ -544,9 +616,9 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 			break
 
 		model_pars,_=models[0]['MPR_all']
-		nvalid=[sum(results[gene][level]['success'] and x in results[gene][level]['est_pars'] for gene in genes) for x in model_pars]
 		new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][x] for gene in genes \
-														 if results[gene][level]['success'] and x in results[gene][level]['est_pars']])) for x in model_pars],\
+														 if results[gene][level]['success'] and \
+														 x in results[gene][level]['est_pars']])) for x in model_pars],\
 								columns=['mu','std'],index=model_pars)
 
 		if new_priors.isnull().any().any():
@@ -554,7 +626,7 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 
 		prior_diff=((model_priors-new_priors)**2).sum().sum()/(new_priors**2).sum().sum()
 
-		print >> sys.stderr, '   iter {0}: {1} fits ({3}/{4}/{5}/{6} valid), prior_diff: {2:.2g}'.format(niter,nfits,prior_diff,*nvalid)
+		print >> sys.stderr, '   iter {0}: {1} fits, prior_diff: {2:.2g}'.format(niter,nfits,prior_diff)
 
 		if prior_diff > 1.e-3 and niter < 10:
 			model_priors=new_priors
@@ -583,12 +655,10 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 
 				print >> sys.stderr, '   model: {0}, {1} fits\r'.format(model,nfits),
 
-				# make numpy arrays out of vals, disp and NF for computational efficiency (therefore we need equal number of replicates for each time point!)
+				# make numpy arrays out of vals, var and NF for computational efficiency
 				vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-				disp_here=disp.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
+				var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
 				nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-				# re-normalize nf to make geometric mean = 1
-				# nf_here=nf_here/np.exp(np.log(nf_here).mean())
 
 				# use initial estimate from previous level
 				if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models:
@@ -600,8 +670,7 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 				if level > 1 and not parent['LRT-q'] < sig_level:
 					continue
 
-				result=fit_model (vals_here, disp_here, nf_here, T, time_points, model_priors, parent, model, model_pars, use_precursor[gene], use_ribo[gene], statsmodel, min_args)
-
+				result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors, parent, model, model_pars, statsmodel, min_args)
 				model_results[gene]=result
 				level_results[gene][model]=result
 				nfits+=1
@@ -611,22 +680,21 @@ def RNAkira (vals, disp, NF, T, sig_level=0.01, min_TPM_precursor=1, min_TPM_rib
 			for gene,q in qvals.iteritems():
 				model_results[gene]['LRT-q']=q
 			nsig=sum(q < sig_level for q in qvals.values())
-			if level > 1:
-				print >> sys.stderr, '   model: {0}, {1} fits ({2} improved at FDR {3:.2g})'.format(model,nfits,nsig,sig_level)
-			else:
-				print >> sys.stderr, '   model: {0}, {1} fits ({2} insufficient at FDR {3:.2g})'.format(model,nfits,nsig,sig_level)
+			message='   model: {0}, {1} fits'.format(model,nfits)
+			if nfits > 0:
+				message +=' ({0} {2} at FDR {1:.2g})'.format(nsig,sig_level,'improved' if level > 1 else 'insufficient')
+			print >> sys.stderr, message
 
 		print >> sys.stderr, '   selecting best models at level {0}'.format(level)
 		for gene in genes:
 			all_results[gene][level]=level_results[gene]
 			if len(level_results[gene]) > 0:
-				results[gene][level]=min(level_results[gene].values(),key=lambda x: x['LRT-q'])
+				results[gene][level]=max(level_results[gene].values(),key=lambda x: x['L'])
 
 	for gene in genes:
 		max_level=max(results[gene].keys())
 		if max_level > 0:
 			max_fit=results[gene][max_level]
-			#pval=scipy.stats.chisqprob(2*np.abs(results[gene][0]['L']-max_fit['L']),np.abs(results[gene][0]['npars']-max_fit['npars']))
 			pval=scipy.stats.chi2.sf(2*np.abs(results[gene][0]['L']-max_fit['L']),np.abs(results[gene][0]['npars']-max_fit['npars']))
 			results[gene][0]['LRT-p']=(pval if np.isfinite(pval) else 1)
 		else:
@@ -660,7 +728,8 @@ def collect_results (results, time_points, sig_level=0.01):
 		tmp+=[('initial_logL',initial_fit['L']),\
 			  ('initial_fit_success',initial_fit['success']),\
 			  ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
-			  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan)]
+			  ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
+			  ('initial_model',initial_fit['model'])]
 
 		# take best significant model or constant otherwise
 		best_fit=filter(lambda x: (x['model'].endswith('0') or x['LRT-q'] < sig_level),res)[-1]
@@ -679,8 +748,8 @@ def collect_results (results, time_points, sig_level=0.01):
 			 ('translation_log2FC',pars['delta']/np.log(2) if 'delta' in pars else 0),\
 			 ('modeled_logL',best_fit['L']),\
 			 ('modeled_fit_success',best_fit['success']),\
-			 ('modeled_pval',best_fit['LRT-p'] if best_fit['model']!='0' else np.nan),\
-			 ('modeled_qval',best_fit['LRT-q'] if best_fit['model']!='0' else np.nan),\
+			 ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
+			 ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
 			 ('best_model',best_fit['model'])]
 
 		output[gene]=OrderedDict(tmp)
@@ -767,20 +836,21 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
 			ax.set_ylabel('FT/unlabeled')
 
 	if fig_name is not None:
-		print >> sys.stderr, '\n[normalize_elu_flowthrough] saving figure to {0}'.format(fig_name)
+		print >> sys.stderr, '\n[normalize_elu_flowthrough] saving figure to {0}'.format(fig_name),
 		fig.savefig(fig_name)
 
 	print >> sys.stderr, '\n'
 
 	return CF
 
-def estimate_dispersion (TPM, fig_name=None, disp_weight=1.8):
+def estimate_dispersion (counts, fig_name=None, weight=1.8):
 
 	""" estimates dispersion by a weighted average of the calculated dispersion and a smoothened trend """
 
-	cols=TPM.columns.get_level_values(0).unique()
-	disp=pd.DataFrame(1,index=TPM.index,columns=TPM.columns)
-	reps=TPM.columns.get_level_values(2).unique()
+	cols=counts.columns.get_level_values(0).unique()
+	time_points=counts.columns.get_level_values(1).unique()
+	disp=pd.DataFrame(1,index=counts.index,columns=pd.MultiIndex.from_product([cols,time_points]))
+	reps=counts.columns.get_level_values(2).unique()
 	nreps=len(reps)
 
 	if fig_name is not None:
@@ -795,52 +865,149 @@ def estimate_dispersion (TPM, fig_name=None, disp_weight=1.8):
 
 		print >> sys.stderr, c,
 
-		mean_TPM=TPM[c].mean(axis=1)
-		var_TPM=TPM[c].var(axis=1)
+		mean_counts_within=counts[c].mean(axis=1,level=0)
+		var_counts_within=counts[c].var(axis=1,level=0)
 		# get dispersion trend for genes with positive values
-		ok=(mean_TPM > 0) & (mean_TPM < var_TPM)
-		#slope,intercept,_,_,_=scipy.stats.linregress(mean_TPM[ok],(var_TPM/mean_TPM)[ok])
-		y=(var_TPM/mean_TPM)[ok]
-		X=np.c_[mean_TPM[ok],np.ones(ok.sum())]
+		ok=(mean_counts_within.values > 0) &\
+			(mean_counts_within.values < var_counts_within.values)
+		#slope,intercept,_,_,_=scipy.stats.linregress(mean_counts[ok],(var_counts/mean_counts)[ok])
+		y=(var_counts_within/mean_counts_within).values[ok]
+		X=np.c_[mean_counts_within.values[ok],np.ones(ok.sum())]
 		wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
-		slope,intercept=wls.fit().params
-        # there's a global normalization factor difference between var and mean, but for small mean we should have var=mean
-		disp_smooth=(intercept-1)/mean_TPM+slope
+		slope_within,intercept_within=wls.fit().params
+		disp_smooth=(intercept_within-1)/mean_counts_within+slope_within
 		disp_smooth[disp_smooth < 0]=0
-		if disp_smooth.isnull().any().any():
-			raise Exception('invalid disp smooth')
-		disp_act=(var_TPM-mean_TPM)/mean_TPM**2
-		# if measured dispersion is negative or NaN, set to trend
-		replace=(disp_act < 0) | disp_act.isnull()
-		disp_act[replace]=disp_smooth[replace]
+		disp_act_within=(var_counts_within-mean_counts_within)/mean_counts_within**2
 		# estimated dispersion is weighted average of real and smoothened
-		disp_est=np.exp((1.-disp_weight/nreps)*np.log(disp_act)+disp_weight*np.log(disp_smooth)/nreps)
-		if disp_est.isnull().any().any():
-			raise Exception('invalid disp smooth')
+		#disp_est=np.exp((1.-weight/nreps)*np.log(disp_act_within)+weight*np.log(disp_smooth)/nreps)
+		disp_est=(1.-weight/nreps)*disp_act_within+weight*disp_smooth/nreps
 
-		disp[c]=disp_est
+		# if estimated dispersion is negative or NaN, use across-sample estimate
+		replace=((disp_est < 0) | disp_est.isnull()).any(axis=1)
+		if replace.sum() > 0:
+
+			mean_counts_all=counts[c].mean(axis=1)
+			var_counts_all=counts[c].var(axis=1)
+			# get dispersion trend for genes with positive values
+			ok=(mean_counts_all > 0) & (mean_counts_all < var_counts_all)
+			y=(var_counts_all/mean_counts_all)[ok]
+			X=np.c_[mean_counts_all[ok],np.ones(ok.sum())]
+			wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
+			slope_all,intercept_all=wls.fit().params
+			disp_smooth=(intercept_all-1)/mean_counts_all+slope_all
+			disp_act_all=(var_counts_all-mean_counts_all)/mean_counts_all**2
+			#repl=np.exp((1.-weight/nreps)*np.log(disp_act_all)+weight*np.log(disp_smooth)/nreps)[replace]
+			repl=((1.-weight/nreps)*disp_act_all+weight*disp_smooth/nreps)[replace]
+			disp_est[replace]=pd.concat([repl]*len(time_points),axis=1,keys=time_points)
+
+		# NaN values only where mean = 0
+		disp[c]=disp_est.fillna(1)
 
 		if fig_name is not None:
 
 			ax=fig.add_subplot(1,len(cols),n+1)
-			ax.hexbin(np.log10(mean_TPM).values.flatten(),np.log10(disp_act).values.flatten(),bins='log',lw=0,extent=(-1,5,-4,1),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			ax.hexbin(np.log10(mean_counts_within).values.flatten(),np.log10(disp_act_within).values.flatten(),bins='log',lw=0,extent=(-1,5,-3,2),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
 			# plot estimated values
-			ax.plot(np.log10(mean_TPM).values.flatten()[::10],np.log10(disp_est).values.flatten()[::10],'c.',markersize=2)
+			ax.plot(np.log10(mean_counts_within).values.flatten()[::10],np.log10(disp_est).values.flatten()[::10],'c.',markersize=2)
 			# plot trend
-			ax.plot(np.arange(-1,5,.1),np.log10((intercept-1)/10**np.arange(-1,5,.1)+slope),'r-')
+			ax.plot(np.arange(-1,5,.1),np.log10((intercept_within-1)/10**np.arange(-1,5,.1)+slope_within),'r-')
 			ax.set_xlim([-1,5])
-			ax.set_ylim([-4,1])
+			ax.set_ylim([-3,2])
 			ax.set_title('{0}'.format(c))
 			ax.set_xlabel('log10 mean')
 			ax.set_ylabel('log10 disp')
 
 	if fig_name is not None:
-		print >> sys.stderr, '\n[estimate_dispersion] saving figure to {0}'.format(fig_name)
+		print >> sys.stderr, '\n[estimate_dispersion] saving figure to {0}'.format(fig_name),
 		fig.savefig(fig_name)
 
 	print >> sys.stderr, '\n'
 
 	return disp
+
+def estimate_stddev (TPM, fig_name=None, weight=1.8):
+
+	""" estimates stddev by a weighted average of the calculated std dev and a smoothened std dev from the mean-variance plot """
+
+	cols=TPM.columns.get_level_values(0).unique()
+	time_points=TPM.columns.get_level_values(1).unique()
+	stddev=pd.DataFrame(1,index=TPM.index,columns=pd.MultiIndex.from_product([cols,time_points]))
+	reps=TPM.columns.get_level_values(2).unique()
+	nreps=len(reps)
+
+	if fig_name is not None:
+		import matplotlib
+		matplotlib.use('Agg')
+		from matplotlib import pyplot as plt
+		fig=plt.figure(figsize=(3*len(cols),3))
+		fig.subplots_adjust(left=.05,right=.98,hspace=.4,wspace=.3,bottom=.15)
+
+	print >> sys.stderr, '\n[estimate_stddev] averaging samples:\n   ',
+	for n,c in enumerate(cols):
+
+		print >> sys.stderr, c, 
+
+		# first do within-group stddev
+		log10_std_within=np.log10(TPM[c].std(axis=1,level=0))
+		# perform lowess regression on log CV vs log mean
+		log10_means_within=np.log10(TPM[c].mean(axis=1,level=0))
+		log10_CV_within=log10_std_within-log10_means_within
+		ok=np.isfinite(log10_means_within) & np.isfinite(log10_CV_within)
+		log10_mean_range=np.abs(log10_means_within[ok].max().max()-log10_means_within[ok].min().min())
+		lowess_within=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_within[ok].values.flatten(),\
+																		log10_means_within[ok].values.flatten(),\
+																		frac=0.2,it=1,delta=.01*log10_mean_range).T
+		# this interpolates log10 CV from log10 mean
+		interp_within=scipy.interpolate.interp1d(lowess_within[0],lowess_within[1],bounds_error=False)
+
+		# get interpolated std dev within groups
+		log10_std_smooth=interp_within(log10_means_within)+log10_means_within
+		# estimated std dev is weighted average of real and smoothened
+		log10_std_est=(1.-weight/nreps)*log10_std_within+weight*log10_std_smooth/nreps
+		replace=log10_std_est.isnull().any(axis=1)
+
+		if replace.sum() > 0:
+
+			# do stddev over all samples
+			log10_std_all=np.log10(TPM[c].std(axis=1))
+			# perform lowess regression on log CV vs log mean
+			log10_means_all=np.log10(TPM[c].mean(axis=1))
+			log10_CV_all=log10_std_all-log10_means_all
+			ok=np.isfinite(log10_means_all) & np.isfinite(log10_CV_all)
+			log10_mean_range=np.abs(log10_means_all[ok].max()-log10_means_all[ok].min())
+			lowess_all=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_all[ok].values,log10_means_all[ok].values,\
+																		 frac=0.2,it=1,delta=.01*log10_mean_range).T
+			interp_all=scipy.interpolate.interp1d(lowess_all[0],lowess_all[1],bounds_error=False)
+
+			repl=((1.-weight/nreps)*log10_std_all+weight*(interp_all(log10_means_all)+log10_means_all)/nreps)[replace]
+			log10_std_est[replace]=pd.concat([repl]*len(time_points),axis=1,keys=time_points)
+
+		# add estimated std dev (NaN values only where mean=0)
+		stddev[c]=10**log10_std_est.fillna(1)
+
+		if fig_name is not None:
+
+			# get regularized CV
+			log10_CV_est=log10_std_est-log10_means_within
+			ax=fig.add_subplot(1,len(cols),n+1)
+			ax.hexbin(log10_means_within.values.flatten(),log10_CV_within.values.flatten(),\
+					  bins='log',lw=0,extent=(-2,5,-2,1),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			# plot estimated values
+			ax.plot(log10_means_within.values.flatten()[::10],log10_CV_est.values.flatten()[::10],'c.',markersize=2)
+			ax.plot(np.arange(-2,5,.1),interp_within(np.arange(-2,5,.1)),'r-')
+			ax.set_xlim([-2,5])
+			ax.set_ylim([-2,1])
+			ax.set_title('{0}'.format(c))
+			ax.set_xlabel('log10 mean')
+			ax.set_ylabel('log10 CV')
+
+	if fig_name is not None:
+		print >> sys.stderr, '\n[estimate_stddev] saving figure to {0}'.format(fig_name),
+		fig.savefig(fig_name)
+
+	print >> sys.stderr, '\n'
+
+	return stddev
 
 def read_featureCounts_output (inf,samples):
 
@@ -849,8 +1016,6 @@ def read_featureCounts_output (inf,samples):
 	fc_table=pd.read_csv(inf,sep='\t',comment='#',index_col=0,header=0)
 	counts=fc_table.ix[:,5:].astype(int)
 	length=fc_table.ix[:,4]/1.e3
-	#RPK=counts.divide(length,axis=0)
-	#RPK.columns=samples
 	counts.columns=pd.MultiIndex.from_tuples(samples)
 	return counts,length
 
@@ -871,12 +1036,12 @@ if __name__ == '__main__':
 	parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
 	parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05,type=float)
 	parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
-	parser.add_option('','--min_TPM_mature',dest='min_TPM_mature',help="min TPM for mature [1]",default=1,type=float)
-	parser.add_option('','--min_TPM_precursor',dest='min_TPM_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
-	parser.add_option('','--min_TPM_ribo',dest='min_TPM_ribo',help="min TPM for ribo [1]",default=1,type=float)
-	parser.add_option('','--disp_weight',dest='disp_weight',help="weighting parameter for dispersion estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
+	parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
+	parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
+	parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
+	parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
+	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
 	parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or neg binom)",default='nbinom')
-	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_true')
 
 	# ignore warning about division by zero or over-/underflows
 	np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
@@ -893,6 +1058,7 @@ if __name__ == '__main__':
 	samples=[]
 	for t in time_points:
 		samples.append((t,'Rep'+str(sum(x[0]==t for x in samples)+1)))
+
 	nsamples=len(samples)
 
 	if options.input_TPM is not None:
@@ -900,6 +1066,9 @@ if __name__ == '__main__':
 		print >> sys.stderr, '\n[main] reading TPM values from '+options.input_TPM
 		print >> sys.stderr, '       ignoring options -eEfFruU'
 		TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
+
+		# neg binom doesn't work here
+		statsmodel='gaussian'
 
 	else:
 
@@ -926,7 +1095,7 @@ if __name__ == '__main__':
 		print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
 		unlabeled_exons,unlabeled_exon_length=read_featureCounts_output(options.unlabeled_exons,samples)
 
-		print >> sys.stderr, "\n[main] merging count values and computing TPM"
+		print >> sys.stderr, "[main] merging count values and normalizing"
 
 		cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -949,50 +1118,46 @@ if __name__ == '__main__':
 
 
 		# size factors
-		SF=pd.concat([elu_factor,elu_factor,\
-					  flowthrough_factor,flowthrough_factor,\
-					  ribo_factor,\
-					  unlabeled_factor,unlabeled_factor],axis=0,keys=cols)
+		SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
+					  elu_factor,flowthrough_factor,unlabeled_factor,\
+					  ribo_factor],axis=0,keys=cols)
 		
 		# compute TPM
 		TPM=RPK.divide(SF,axis=1).sort_index(axis=1)
 
-		print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
-		TPM.to_csv(options.out_prefix+'_TPM.csv')
+		statsmodel=options.statsmodel
 
 	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 
 	# correction factors
+	print >> sys.stderr, '[main] correcting TPM values using gene stats from '+options.gene_stats
 	CF=normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=(None if options.no_plots else options.out_prefix+'_TPM_correction.pdf'))
 
 	print >> sys.stderr, '[main] saving corrected TPM values to '+options.out_prefix+'_corrected_TPM.csv'
 	TPM=TPM.multiply(CF)
 	TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
 
-	disp=estimate_dispersion (TPM, fig_name=(None if options.no_plots else options.out_prefix+'_dispersion.pdf'), disp_weight=options.disp_weight)
+	# normalization factor for counts combines length and size factors with TPM correction (such that TPM = counts.multiply(NF))
+	NF=CF.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
 
-	# select genes based on TPM cutoffs for mature, precursor in any of the time points
-	take=(TPM['unlabeled-mature'] > options.min_TPM_mature).any(axis=1) &\
-		(TPM['unlabeled-precursor'] > options.min_TPM_precursor).any(axis=1)
-
-	if options.input_TPM is not None:
-		statsmodel='gaussian'
-		print >> sys.stderr, '[main] running RNAkira with TPM input (model: {0})'.format(statsmodel)
-		NF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns)
-		results=RNAkira(TPM[take].fillna(0), disp[take].fillna(0), NF[take], options.T, \
-						sig_level=options.alpha, min_TPM_ribo=options.min_TPM_ribo,maxlevel=options.maxlevel, statsmodel=statsmodel)
+	print >> sys.stderr, '[main] estimating variability'
+	if statsmodel=='nbinom':
+		variability=estimate_dispersion (counts*NF.divide(np.exp(np.log(NF).mean(axis=1)),axis=0), \
+										 fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
 	else:
-		statsmodel=options.statsmodel
-		print >> sys.stderr, '[main] running RNAkira with counts input (model: {0})'.format(statsmodel)
-		# normalization factor for counts combines length and size factors with TPM correction (such that TPM = counts.multiply(NF) )
-		NF=CF.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
-		results=RNAkira(counts[take].fillna(0), disp[take].fillna(0), NF[take], options.T, \
-						sig_level=options.alpha, min_TPM_ribo=options.min_TPM_ribo,maxlevel=options.maxlevel, statsmodel=statsmodel)
+		variability=estimate_stddev (TPM, fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
 
-	print >> sys.stderr, '\n[main] collecting output'
+	# select genes based on TPM cutoffs for mature in any of the time points
+	take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) 
+
+	results=RNAkira(counts[take].fillna(0), variability[take].fillna(0), NF[take], options.T, \
+					sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
+					maxlevel=options.maxlevel, statsmodel=statsmodel)
+
+	print >> sys.stderr, '[main] collecting output'
 	output=collect_results(results, time_points, sig_level=options.alpha)
 
-	print >> sys.stderr, '\n   writing results to {0}'.format(options.out_prefix+'_results.csv')
+	print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
 
 	output.to_csv(options.out_prefix+'_results.csv')
 
