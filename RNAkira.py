@@ -5,6 +5,7 @@ import pandas as pd
 import itertools
 import scipy.stats
 import scipy.interpolate
+import scipy.odr
 import scipy.optimize
 import statsmodels.nonparametric.smoothers_lowess
 import statsmodels.regression.linear_model
@@ -33,6 +34,17 @@ def p_adjust_bh(p):
 	q[ok] = np.minimum(1, np.minimum.accumulate(steps * p[ok][by_descend]))[by_orig]
 	q[~ok] = np.nan
 	return q
+
+def odr_regression(xvals,yvals,beta0=[1,0]):
+
+	""" orthogonal distance regression """
+
+	def linear_function (B,x):
+		return B[0]*x + B[1]
+	linear=scipy.odr.Model(linear_function)
+	data=scipy.odr.Data(xvals,yvals)
+	myodr=scipy.odr.ODR(data,linear,beta0=beta0)
+	return myodr.run().beta
 
 def get_steady_state_values (x, T, use_precursor, use_ribo, use_deriv=False):
 
@@ -253,14 +265,15 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
 			exp_mean=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo)
 
 		if statsmodel=='gaussian':
-			# here var is stddev
-			diff=vals[i]-exp_mean/nf[i]
-			fun+=np.sum(-.5*(diff/var[i])**2-.5*np.log(2.*np.pi)-np.log(var[i]))
+			# here "var" is stddev
+			diff=vals[i]*nf[i]-exp_mean
+			#fun+=np.sum(-.5*(diff/var[i])**2-.5*np.log(2.*np.pi)-np.log(var[i]))
+			fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var[i]))
 			if use_deriv:
-				grad+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2/nf[i],axis=0))
+				grad+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2,axis=0))
 
 		elif statsmodel=='nbinom':
-			# here var is dispersion
+			# here "var" is dispersion
 			mu=exp_mean/nf[i]
 			nn=1./var[i]
 			pp=1./(1.+var[i]*mu)
@@ -315,7 +328,7 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
 			my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
 							   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 			diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-			if diff > 1.e-8:
+			if diff > 1.e-7:
 				raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 		# perform minimization
@@ -366,7 +379,7 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
 				my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
 								   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
 				diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-				if diff > 1.e-8:
+				if diff > 1.e-7:
 					raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
 
 			res=scipy.optimize.minimize(steady_state_log_likelihood, \
@@ -421,6 +434,12 @@ def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, 
 	nrates=len(rates)
 	ndim=len(cols)
 
+	fig=plt.figure(figsize=(15,6))
+	fig.clf()
+	fig.subplots_adjust(wspace=.5,hspace=.4,left=.05,right=.98)
+
+	ax=[fig.add_subplot(2,ndim,i+1) for i in range(ndim+nrates)]
+
 	# first plot data and fits to data
 
 	for i in range(ndim):
@@ -445,7 +464,7 @@ def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, 
 				ax[i].plot(times,pred_vals[i],linestyle=':',label='initial')
 
 	for i,c in enumerate(cols):
-		ax[i].set_title(c)
+		ax[i].set_title(c,size=10)
 		ax[i].set_xlabel('time')
 
 	ax[0].set_ylabel('expression')
@@ -470,6 +489,10 @@ def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, 
 	for i,r in enumerate(rates):
 		ax[ndim+i].set_title(r)
 		ax[ndim+i].set_xlabel('time')
+
+	ax[ndim+nrates-1].legend(loc=2,frameon=False,prop={'size':10},bbox_to_anchor=(1.1,1))
+
+	fig.suptitle(title)
 
 def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxlevel=None, priors=None, statsmodel='gaussian'):
 
@@ -769,9 +792,6 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
 
 	print >> sys.stderr, '\n[normalize_elu_flowthrough] correcting for 4sU incorporation bias and normalizing by linear regression'
 
-	# select reliable genes with decent mean expression level in unlabeled mature
-	reliable_genes=(gene_stats['gene_type']=='protein_coding') & (TPM['unlabeled-mature'] > TPM['unlabeled-mature'].dropna().quantile(.2)).any(axis=1)
-
 	# collect correction_factors
 	CF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns)
 
@@ -781,33 +801,48 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
 
 		print >> sys.stderr, '{0} ({1})'.format(t,r),
 
+		# select reliable genes with decent mean expression level in unlabeled mature
+		reliable_genes=(gene_stats['gene_type']=='protein_coding') & (TPM['unlabeled-mature',t,r] > TPM['unlabeled-mature',t,r].dropna().quantile(.2))
+
 		log2_elu_ratio=np.log2(TPM['elu-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
 		log2_FT_ratio=np.log2(TPM['flowthrough-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
 
-		log10_ucount=np.log10(1+gene_stats['exon_ucount'])
+		log10_ucount=np.log10(1.+gene_stats['exon_ucount'])
 		ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
 		log10_ucount_range=np.abs(log10_ucount[ok].max()-log10_ucount[ok].min())
 		lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log2_elu_ratio[ok],log10_ucount[ok],\
-																 frac=0.66,it=1,delta=.001*log10_ucount_range).T
+																 frac=0.66,it=1,delta=.1*log10_ucount_range).T
 		interp_elu=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
-		log2_elu_ratio_no_bias=log2_elu_ratio-interp_elu(log10_ucount)
+		ucorr=interp_elu(log10_ucount)-np.mean(interp_elu(np.nanpercentile(log10_ucount,np.arange(90,99))))
+		log2_elu_ratio_no_bias=log2_elu_ratio-ucorr
 
-		elu_percentiles=np.percentile(log2_elu_ratio_no_bias[ok].dropna(),[5,95])
-		FT_percentiles=np.percentile(log2_FT_ratio[ok].dropna(),[5,95])
+		elu_percentiles=np.nanpercentile(log2_elu_ratio_no_bias[ok].dropna(),[5,95])
+		FT_percentiles=np.nanpercentile(log2_FT_ratio[ok].dropna(),[5,95])
 		ok=np.isfinite(log2_elu_ratio_no_bias) & np.isfinite(log2_FT_ratio) & reliable_genes & \
 			(log2_elu_ratio_no_bias > elu_percentiles[0]) & (log2_elu_ratio_no_bias < elu_percentiles[1]) & \
 			(log2_FT_ratio > FT_percentiles[0]) & (log2_FT_ratio < FT_percentiles[1])
-		slope,intercept,_,_,_=scipy.stats.linregress(2**log2_elu_ratio_no_bias[ok],2**log2_FT_ratio[ok])
+
+		x=2**log2_elu_ratio_no_bias[ok]
+		y=2**log2_FT_ratio[ok]
+		X=np.c_[x,np.ones(ok.sum())]
+
+		#w=np.log2(1.+TPM['unlabeled-mature',t,r])
+		#wls=statsmodels.regression.linear_model.WLS(y,X,weights=w[ok]/w.sum())
+		#slope,intercept=wls.fit().params
+		#slope,intercept,_,_,_=scipy.stats.linregress(x,y)
+		slope,intercept=odr_regression(x,y,[-1,1])
 
 		if intercept < 0 or slope > 0:
 			raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
+		#else:
+		#	print >> sys.stderr, 'mean u-corr: {0:.2g}, slope={1:.2g}, intercept={2:.2g}'.format(np.nanmean(ucorr)/np.nanmean(log2_elu_ratio),slope,intercept)
 
 		# normalization factors for introns
-		CF['elu-precursor',t,r]=2**(-np.log2(-intercept/slope))
-		CF['flowthrough-precursor',t,r]=2**(-np.log2(intercept))
+		CF['elu-precursor',t,r]=-slope/intercept
+		CF['flowthrough-precursor',t,r]=1./intercept
 		# correct for 4sU incorporation bias
-		CF['elu-mature',t,r]=2**(log2_elu_ratio_no_bias.fillna(0)-np.log2(-intercept/slope))
-		CF['flowthrough-mature',t,r]=2**(log2_FT_ratio.fillna(0)-np.log2(intercept))
+		CF['elu-mature',t,r]=2**(-ucorr)*(-slope/intercept)
+		CF['flowthrough-mature',t,r]=1./intercept
 		# no correction for unlabeled + ribo
 		CF['unlabeled-precursor',t,r]=1
 		CF['unlabeled-mature',t,r]=1
@@ -818,19 +853,23 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
 			ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(log10_ucount)
 
 			ax=fig.add_subplot(len(samples),2,2*n+1)
-			ax.hexbin(gene_stats['exon_ucount'][ok],log2_elu_ratio[ok],bins='log',extent=(0,5000,-2,2.5),lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-			ax.plot(10**np.arange(0,4,.1),interp_elu(np.arange(0,4,.1)),'r-')
-			ax.set_xlim([0,5000])
-			ax.set_ylim([-2,2.5])
+			bounds=np.concatenate([np.nanpercentile(gene_stats['exon_ucount'][ok],[1,99]),
+								   np.nanpercentile(log2_elu_ratio[ok],[1,99])])
+			ax.hexbin(gene_stats['exon_ucount'][ok],log2_elu_ratio[ok],bins='log',extent=bounds,lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			ax.plot(np.linspace(bounds[0],bounds[1],100),interp_elu(np.linspace(np.log10(1+bounds[0]),np.log10(1+bounds[1]),100)),'r-')
+			ax.set_xlim(bounds[:2])
+			ax.set_ylim(bounds[2:])
 			ax.set_title('{0} {1}'.format(t,r,ok.sum()))
 			ax.set_ylabel('log2 elu/unlabeled')
 			ax.set_xlabel('# U residues')
 
 			ax=fig.add_subplot(len(samples),2,2*n+2)
-			ax.hexbin(2**log2_elu_ratio_no_bias[ok],2**log2_FT_ratio[ok],bins='log',lw=0,extent=(-.1,5,-.1,3),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-			ax.plot(np.arange(0,5,.01),intercept+slope*np.arange(0,5,.01),'r-')
-			ax.set_xlim([-.1,5])
-			ax.set_ylim([-.1,3])
+			bounds=np.concatenate([np.nanpercentile(2**log2_elu_ratio_no_bias[ok],[1,99]),
+								   np.nanpercentile(2**log2_FT_ratio[ok],[1,99])])
+			ax.hexbin(2**log2_elu_ratio_no_bias[ok],2**log2_FT_ratio[ok],bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			ax.plot(np.arange(bounds[0],bounds[1],.01),intercept+slope*np.arange(bounds[0],bounds[1],.01),'r-')
+			ax.set_xlim(bounds[:2])
+			ax.set_ylim(bounds[2:])
 			ax.set_title('{0} {1}'.format(t,r,ok.sum()))
 			ax.set_xlabel('elu/unlabeled')
 			ax.set_ylabel('FT/unlabeled')
@@ -841,7 +880,7 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
 
 	print >> sys.stderr, '\n'
 
-	return CF
+	return CF.fillna(1)
 
 def estimate_dispersion (counts, fig_name=None, weight=1.8):
 
@@ -877,7 +916,7 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
 		slope_within,intercept_within=wls.fit().params
 		disp_smooth=(intercept_within-1)/mean_counts_within+slope_within
 		disp_smooth[disp_smooth < 0]=0
-		disp_act_within=(var_counts_within-mean_counts_within)/mean_counts_within**2
+		disp_act_within=((var_counts_within-mean_counts_within)/mean_counts_within**2).replace([np.inf,-np.inf],np.nan)
 		# estimated dispersion is weighted average of real and smoothened
 		#disp_est=np.exp((1.-weight/nreps)*np.log(disp_act_within)+weight*np.log(disp_smooth)/nreps)
 		disp_est=(1.-weight/nreps)*disp_act_within+weight*disp_smooth/nreps
@@ -906,13 +945,18 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
 		if fig_name is not None:
 
 			ax=fig.add_subplot(1,len(cols),n+1)
-			ax.hexbin(np.log10(mean_counts_within).values.flatten(),np.log10(disp_act_within).values.flatten(),bins='log',lw=0,extent=(-1,5,-3,2),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			x,y=np.log10(mean_counts_within).values.flatten(),np.log10(disp_act_within).values.flatten()
+			bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
+								   np.percentile(y[np.isfinite(y)],[1,99])])
+			if not np.all(np.isfinite(bounds)):
+				raise Exception("bounds not finite")
+			ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
 			# plot estimated values
 			ax.plot(np.log10(mean_counts_within).values.flatten()[::10],np.log10(disp_est).values.flatten()[::10],'c.',markersize=2)
 			# plot trend
-			ax.plot(np.arange(-1,5,.1),np.log10((intercept_within-1)/10**np.arange(-1,5,.1)+slope_within),'r-')
-			ax.set_xlim([-1,5])
-			ax.set_ylim([-3,2])
+			ax.plot(np.arange(bounds[0],bounds[1],.1),np.log10((intercept_within-1)/10**np.arange(bounds[0],bounds[1],.1)+slope_within),'r-')
+			ax.set_xlim(bounds[:2])
+			ax.set_ylim(bounds[2:])
 			ax.set_title('{0}'.format(c))
 			ax.set_xlabel('log10 mean')
 			ax.set_ylabel('log10 disp')
@@ -948,15 +992,15 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
 		print >> sys.stderr, c, 
 
 		# first do within-group stddev
-		log10_std_within=np.log10(TPM[c].std(axis=1,level=0))
+		log10_std_within=np.log10(TPM[c].std(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
 		# perform lowess regression on log CV vs log mean
-		log10_means_within=np.log10(TPM[c].mean(axis=1,level=0))
+		log10_means_within=np.log10(TPM[c].mean(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
 		log10_CV_within=log10_std_within-log10_means_within
 		ok=np.isfinite(log10_means_within) & np.isfinite(log10_CV_within)
 		log10_mean_range=np.abs(log10_means_within[ok].max().max()-log10_means_within[ok].min().min())
 		lowess_within=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_within[ok].values.flatten(),\
 																		log10_means_within[ok].values.flatten(),\
-																		frac=0.2,it=1,delta=.01*log10_mean_range).T
+																		frac=0.6,it=1,delta=.01*log10_mean_range).T
 		# this interpolates log10 CV from log10 mean
 		interp_within=scipy.interpolate.interp1d(lowess_within[0],lowess_within[1],bounds_error=False)
 
@@ -976,7 +1020,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
 			ok=np.isfinite(log10_means_all) & np.isfinite(log10_CV_all)
 			log10_mean_range=np.abs(log10_means_all[ok].max()-log10_means_all[ok].min())
 			lowess_all=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_all[ok].values,log10_means_all[ok].values,\
-																		 frac=0.2,it=1,delta=.01*log10_mean_range).T
+																		 frac=0.6,it=1,delta=.01*log10_mean_range).T
 			interp_all=scipy.interpolate.interp1d(lowess_all[0],lowess_all[1],bounds_error=False)
 
 			repl=((1.-weight/nreps)*log10_std_all+weight*(interp_all(log10_means_all)+log10_means_all)/nreps)[replace]
@@ -990,13 +1034,15 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
 			# get regularized CV
 			log10_CV_est=log10_std_est-log10_means_within
 			ax=fig.add_subplot(1,len(cols),n+1)
-			ax.hexbin(log10_means_within.values.flatten(),log10_CV_within.values.flatten(),\
-					  bins='log',lw=0,extent=(-2,5,-2,1),cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+			x,y=log10_means_within.values.flatten(),log10_CV_within.values.flatten()
+			bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
+								   np.percentile(y[np.isfinite(y)],[1,99])])
+			ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
 			# plot estimated values
 			ax.plot(log10_means_within.values.flatten()[::10],log10_CV_est.values.flatten()[::10],'c.',markersize=2)
-			ax.plot(np.arange(-2,5,.1),interp_within(np.arange(-2,5,.1)),'r-')
-			ax.set_xlim([-2,5])
-			ax.set_ylim([-2,1])
+			ax.plot(np.arange(bounds[0],bounds[1],.1),interp_within(np.arange(bounds[0],bounds[1],.1)),'r-')
+			ax.set_xlim(bounds[:2])
+			ax.set_ylim(bounds[2:])
 			ax.set_title('{0}'.format(c))
 			ax.set_xlabel('log10 mean')
 			ax.set_ylabel('log10 CV')
@@ -1041,7 +1087,7 @@ if __name__ == '__main__':
 	parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
 	parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
 	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
-	parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or neg binom)",default='nbinom')
+	parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
 
 	# ignore warning about division by zero or over-/underflows
 	np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
@@ -1068,7 +1114,12 @@ if __name__ == '__main__':
 		TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
 
 		# neg binom doesn't work here
-		statsmodel='gaussian'
+		options.statsmodel='gaussian'
+
+		# size factors are 1
+		SF=pd.Series(1,index=TPM.columns)
+		# length factors are 1
+		LF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns.get_level_value(0).unique())
 
 	else:
 
@@ -1101,48 +1152,43 @@ if __name__ == '__main__':
 
 		counts=pd.concat([elu_exons,flowthrough_exons,unlabeled_exons,\
 						  elu_introns,flowthrough_introns,unlabeled_introns,\
-						  ribo],axis=1,keys=cols)
+						  ribo],axis=1,keys=cols).sort_index(axis=1)
 
 		# combine length factors
 		LF=pd.concat([elu_exon_length,flowthrough_exon_length,unlabeled_exon_length,\
 					  elu_intron_length,flowthrough_intron_length,unlabeled_intron_length,\
-					  ribo_length],axis=1,keys=cols)
+					  ribo_length],axis=1,keys=cols).fillna(1)
 
-		# for size factors, add up RPK values for different fractions (introns and exons), count missing entries as zero
-		RPK=counts.divide(LF,axis=0,level=0)
-		elu_factor=RPK['elu-mature'].add(RPK['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
-		flowthrough_factor=RPK['flowthrough-mature'].add(RPK['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
-		unlabeled_factor=RPK['unlabeled-mature'].add(RPK['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
+		# for size factors, add up counts for different fractions (introns and exons), count missing entries as zero
+		elu_factor=counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
+		flowthrough_factor=counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
+		unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
 		# for ribo, do as usual
-		ribo_factor=RPK['ribo'].sum(axis=0)/1.e6
-
-
-		# size factors
+		ribo_factor=counts['ribo'].sum(axis=0)/1.e6
+		# combine size factors
 		SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
 					  elu_factor,flowthrough_factor,unlabeled_factor,\
 					  ribo_factor],axis=0,keys=cols)
 		
-		# compute TPM
-		TPM=RPK.divide(SF,axis=1).sort_index(axis=1)
+		TPM=counts.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(0)
 
-		statsmodel=options.statsmodel
-
-	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
+	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[counts.index]
 
 	# correction factors
 	print >> sys.stderr, '[main] correcting TPM values using gene stats from '+options.gene_stats
-	CF=normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=(None if options.no_plots else options.out_prefix+'_TPM_correction.pdf'))
+	CF=normalize_elu_flowthrough (TPM, samples, gene_stats, \
+								  fig_name=(None if options.no_plots else options.out_prefix+'_TPM_correction.pdf'))
 
-	print >> sys.stderr, '[main] saving corrected TPM values to '+options.out_prefix+'_corrected_TPM.csv'
-	TPM=TPM.multiply(CF)
-	TPM.to_csv(options.out_prefix+'_corrected_TPM.csv')
-
-	# normalization factor for counts combines length and size factors with TPM correction (such that TPM = counts.multiply(NF))
+	# normalization factor combines length and size factors with TPM correction 
+	print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
+	CF.divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv')
 	NF=CF.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
+	TPM=TPM.multiply(CF,fill_value=1)
 
 	print >> sys.stderr, '[main] estimating variability'
-	if statsmodel=='nbinom':
-		variability=estimate_dispersion (counts*NF.divide(np.exp(np.log(NF).mean(axis=1)),axis=0), \
+	if options.statsmodel=='nbinom':
+		# estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
+		variability=estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1), \
 										 fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
 	else:
 		variability=estimate_stddev (TPM, fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
@@ -1150,9 +1196,14 @@ if __name__ == '__main__':
 	# select genes based on TPM cutoffs for mature in any of the time points
 	take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) 
 
-	results=RNAkira(counts[take].fillna(0), variability[take].fillna(0), NF[take], options.T, \
-					sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
-					maxlevel=options.maxlevel, statsmodel=statsmodel)
+	if options.input_TPM is None:
+		results=RNAkira(counts[take].fillna(0), variability[take], NF[take], options.T, \
+						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
+						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
+	else:
+		results=RNAkira(TPM[take].fillna(0), variability[take], NF[take], options.T, \
+						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
+						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
 	print >> sys.stderr, '[main] collecting output'
 	output=collect_results(results, time_points, sig_level=options.alpha)
