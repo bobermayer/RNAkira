@@ -1120,7 +1120,7 @@ if __name__ == '__main__':
 		# size factors are 1
 		SF=pd.Series(1,index=TPM.columns)
 		# length factors are 1
-		LF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns.get_level_value(0).unique())
+		LF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns.get_level_values(0).unique())
 
 	else:
 
@@ -1204,7 +1204,8 @@ if __name__ == '__main__':
 						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
 						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 	else:
-		results=RNAkira(TPM[take].fillna(0), variability[take], CF[take], options.T, \
+		# now TPMs already include correction factors, so use NF=1
+		results=RNAkira(TPM[take].fillna(0), variability[take], pd.DataFrame(1,index=NF.index,columns=NF.columns)[take], options.T, \
 						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
 						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
