@@ -1087,6 +1087,7 @@ if __name__ == '__main__':
 	parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
 	parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
 	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
+	parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression""")
 	parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
 
 	# ignore warning about division by zero or over-/underflows
@@ -1172,16 +1173,18 @@ if __name__ == '__main__':
 		
 		TPM=counts.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(0)
 
-	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[counts.index]
+	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 
 	# correction factors
 	print >> sys.stderr, '[main] correcting TPM values using gene stats from '+options.gene_stats
 	CF=normalize_elu_flowthrough (TPM, samples, gene_stats, \
 								  fig_name=(None if options.no_plots else options.out_prefix+'_TPM_correction.pdf'))
 
-	# normalization factor combines length and size factors with TPM correction 
-	print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
-	CF.divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv')
+	# normalization factor combines size factors with TPM correction 
+	if options.save_normalization_factors:
+		print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
+		CF.divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv')
+
 	NF=CF.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
 	TPM=TPM.multiply(CF,fill_value=1)
 
@@ -1201,7 +1204,7 @@ if __name__ == '__main__':
 						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
 						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 	else:
-		results=RNAkira(TPM[take].fillna(0), variability[take], NF[take], options.T, \
+		results=RNAkira(TPM[take].fillna(0), variability[take], CF[take], options.T, \
 						sig_level=options.alpha, min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
 						maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
