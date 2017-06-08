@@ -34,7 +34,7 @@ def merge_intervals (intervals):
 
 	return merged
 
-def write_gene_lines (lines, outf):
+def write_gene_lines (lines, outf, genome=None):
 
 	""" take all non-transcript GTF lines for a specific gene, fix UTR annotation, add intron coordinates, and calculate length and number of U's in merged exonic and intronic sequences """
 
@@ -118,42 +118,50 @@ def write_gene_lines (lines, outf):
 	merged_exon_coords=merge_intervals (exon_coords)
 	merged_exon_info=exon_lines[0][0:8]+[';'.join(set.intersection(*[set(ls[8].strip(';').split(';')) for ls in exon_lines])).strip()]
 
-	# get sequence for exons and count U'
-	exon_seq=''.join(genome[chrom][start:end] for start,end in merged_exon_coords)
-	if strand=='-':
-		exon_seq=RC(exon_seq)
-	exon_ucount=exon_seq.count('T')
-	exon_length=len(exon_seq)
+	exon_length=sum(end-start for start,end in merged_exon_coords)
 
-	if len(exon_seq) != sum(end-start for start,end in merged_exon_coords):
-		raise Exception("this shouldn't happen!")
+	# get sequence for exons and count U'
+	if genome is not None:
+		exon_seq=''.join(genome[chrom][start:end] for start,end in merged_exon_coords)
+		if strand=='-':
+			exon_seq=RC(exon_seq)
+		exon_ucount=exon_seq.count('T')
+		if len(exon_seq) != exon_length:
+			raise Exception("this shouldn't happen!")
 
 	# print lines for introns and get their sequence
 	nintrons=len(merged_exon_coords)-1
 	intron_seq=''
+	intron_length=0
 	for n in range(nintrons):
 		intron_start=merged_exon_coords[n][1]+1
 		intron_end=merged_exon_coords[n+1][0]-1
 		if intron_end > intron_start:
 			ls=merged_exon_info
 			outf.write('{0}\t{1}\tintron\t{2}\t{3}\t'.format(ls[0],ls[1],intron_start,intron_end)+'\t'.join(ls[5:])+'; intron_number {0};\n'.format(n+1))
-			intron_seq+=genome[chrom][intron_start:intron_end]
+			intron_length+=intron_end-intron_start
+			if genome is not None:
+				intron_seq+=genome[chrom][intron_start:intron_end]
 
-	if strand=='-':
-		intron_seq=RC(intron_seq)
-	intron_ucount=intron_seq.count('T')
-	intron_length=len(intron_seq)
+	if genome is not None:
+		if strand=='-':
+			intron_seq=RC(intron_seq)
+		intron_ucount=intron_seq.count('T')
+
+	res=dict(gene_type=info['gene_type'],\
+			 gene_name=info['gene_name'],\
+			 exon_length=exon_length,\
+			 intron_length=intron_length,\
+			 CDS_length=CDS_length,\
+			 UTR3_length=UTR3_length,\
+			 UTR5_length=UTR5_length)
+
+	if genome is not None:
+		res['exon_ucount']=exon_ucount
+		res['intron_ucount']=intron_ucount
 
 	# collect info for this gene in a dictionary
-	return (gene,dict(gene_type=info['gene_type'],\
-					  gene_name=info['gene_name'],\
-					  exon_length=exon_length,\
-					  exon_ucount=exon_ucount,\
-					  intron_length=intron_length,\
-					  intron_ucount=intron_ucount,\
-					  CDS_length=CDS_length,\
-					  UTR3_length=UTR3_length,\
-					  UTR5_length=UTR5_length))
+	return (gene,res)
 	
 
 if __name__ == '__main__':
@@ -162,7 +170,7 @@ if __name__ == '__main__':
 	parser.add_option('-i','--infile',dest='infile',help="input GTF (default: stdin), should be sorted so that all lines for one gene are together")
 	parser.add_option('-o','--outfile',dest='outfile',help="output GTF (default: stdout)")
 	parser.add_option('-s','--stats',dest='stats',help="if given, write gene stats to here")
-	parser.add_option('-g','--genome',dest='genome',help="genome in 2bit format")
+	parser.add_option('-g','--genome',dest='genome',help="if exonic and intronic U's should be counted, give genome in 2bit format")
 
 	options,args=parser.parse_args()
 
@@ -186,7 +194,7 @@ if __name__ == '__main__':
 		else:
 			outf=open(options.outfile,'w')
 
-	if options.stats is not None:
+	if options.genome is not None:
 		genome=TwoBitFile(options.genome)
 
 	gene_lines=[]
@@ -205,7 +213,7 @@ if __name__ == '__main__':
 		if ls[2]=='gene':
 
 			try:
-				gene,stats=write_gene_lines(gene_lines, outf)
+				gene,stats=write_gene_lines(gene_lines, outf, genome if options.genome is not None else None)
 				if gene not in gene_stats:
 					gene_stats[gene]=stats
 				else:
@@ -227,7 +235,7 @@ if __name__ == '__main__':
 			gene_lines.append(line)
 
 	try:
-		gene,stats=write_gene_lines(gene_lines, outf)
+		gene,stats=write_gene_lines(gene_lines, outf, genome if options.genome is not None else None)
 		if gene not in gene_stats:
 			gene_stats[gene]=stats
 		else:

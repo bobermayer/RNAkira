@@ -636,6 +636,7 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
 			nfits+=1
 
 		if priors is not None:
+			print >> sys.stderr, '   done: {1} fits\r'.format(nfits)
 			break
 
 		model_pars,_=models[0]['MPR_all']
@@ -1087,7 +1088,8 @@ if __name__ == '__main__':
 	parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
 	parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
 	parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for 4sU bias correction and normalization",action='store_false')
-	parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression""")
+	parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
+	parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
 	parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
 
 	# ignore warning about division by zero or over-/underflows
@@ -1172,6 +1174,10 @@ if __name__ == '__main__':
 					  ribo_factor],axis=0,keys=cols)
 		
 		TPM=counts.divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(0)
+
+		if options.save_TPM:
+			print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
+			TPM.to_csv(options.out_prefix+'_TPM.csv')
 
 	gene_stats=pd.read_csv(options.gene_stats,index_col=0,header=0).loc[TPM.index]
 

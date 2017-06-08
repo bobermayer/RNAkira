@@ -39,6 +39,8 @@ true_gene_class=['MPR_0']*5000+\
 	['MPR_bcd']*9+\
 	['MPR_abcd']*7
 
+true_gene_class=['MPR_0']*1900+['MPR_a']*100
+
 # define time points
 time_points=['0','12','24','36','48']
 times=map(float,time_points)
@@ -105,7 +107,6 @@ parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.0
 options,args=parser.parse_args()
 
 sig_level=float(options.alpha)
-T=float(options.T)
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -125,6 +126,8 @@ true_gene_class=pd.Series(true_gene_class,index=genes)
 parameters_known=True
 parameters={}
 counts={}
+#disp={}
+#stddev={}
 
 print >> sys.stderr, '\n[test_RNAkira] drawing parameters and observations for {0} genes ({1} time points, {2} replicates)'.format(nGenes,len(time_points),len(replicates))
 print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
@@ -160,6 +163,8 @@ for ng,gene in enumerate(genes):
 
 	# now get random values for observations according to these rate parameters
 	cnts=pd.Series(index=pd.MultiIndex.from_product([cols,time_points,replicates]))
+	#std=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
+	#dsp=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
 
 	for i,t in enumerate(time_points):
 
@@ -173,13 +178,19 @@ for ng,gene in enumerate(genes):
 				cnts[cols[n],t]=scipy.stats.poisson.rvs(mu_eff[n],size=len(replicates))
 			else:
 				cnts[cols[n],t]=scipy.stats.nbinom.rvs(1./d,1./(1.+d*mu_eff[n]),size=len(replicates))
+			#std[cols[n],t]=np.sqrt(mu_eff[n]*(1.+d*mu_eff[n]))
+			#dsp[cols[n],t]=d
 
 	parameters[gene]=pars
 	counts[gene]=cnts
+	#stddev[gene]=std
+	#disp[gene]=dsp
 
 print >> sys.stderr, ''
 
 counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
+#disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
+#stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
 LF=gene_stats['exon_length']/1.e3
 
@@ -194,10 +205,12 @@ SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
 
 CF=RNAkira.normalize_elu_flowthrough(counts.divide(LF,axis=0).divide(SF,axis=1).fillna(1),samples,gene_stats,fig_name='test_TPM_correction.pdf')
 NF=CF.divide(LF,axis=0).divide(SF,axis=1).fillna(1)
+#NF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
 
 TPM=counts.multiply(NF)
 stddev=RNAkira.estimate_stddev (TPM,fig_name='test_variability_stddev.pdf')
 disp=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),fig_name='test_variability_disp.pdf')
+
 
 results_gaussian=RNAkira.RNAkira(counts, stddev, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='gaussian')
 results_nbinom=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='nbinom')
@@ -209,17 +222,18 @@ output_true=pd.DataFrame([pd.DataFrame(RNAkira.get_rates(time_points,parameters[
 output_true['initial_synthesis']-=np.log(SF['unlabeled-mature'].mean())
 output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 
-counts.to_csv('test_counts.csv')
-output_gaussian.to_csv('test_gaussian_output.csv')
-output_nbinom.to_csv('test_nbinom_output.csv')
-output_true.to_csv('test_true_output.csv')
+#counts.to_csv('test_counts.csv')
+#output_gaussian.to_csv('test_gaussian_output.csv')
+#output_nbinom.to_csv('test_nbinom_output.csv')
+#output_true.to_csv('test_true_output.csv')
 
 print >> sys.stderr, '\n[test_RNAkira] evaluating performance'
 
-for output,results,statsmodel in zip([output_gaussian,output_nbinom],[results_gaussian,results_nbinom],['gaussian','nbinom']):
+#for output,results,statsmodel in zip([output_gaussian,output_nbinom],[results_gaussian,results_nbinom],['gaussian','nbinom']):
+for output,statsmodel in zip([output_gaussian,output_nbinom],['gaussian','nbinom']):
 
 	inferred_gene_class=output.ix[genes,'best_model']
-	#inferred_gene_class[output.ix[genes,'initial_qval'] < options.sig_level]=output.ix[genes,'initial_model'][output.ix[genes,'initial_qval'] < options.sig_level]
+	inferred_gene_class[output.ix[genes,'initial_qval'] < options.alpha]=output.ix[genes,'initial_model'][output.ix[genes,'initial_qval'] < options.alpha]
 
 	# use this if you want to plot specific examples
 	if False:
@@ -235,7 +249,7 @@ for output,results,statsmodel in zip([output_gaussian,output_nbinom],[results_ga
 										 'P' in true_gene_class[gene],\
 										 'R' in true_gene_class[gene],\
 										 title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
-										 priors=None,sig_level=sig_level)
+										 priors=None,sig_level=options.alpha)
 
 	tgc=np.array([m.split('_')[1] for m in true_gene_class])
 	igc=np.array([m.split('_')[1] for m in inferred_gene_class])
@@ -270,7 +284,7 @@ for output,results,statsmodel in zip([output_gaussian,output_nbinom],[results_ga
 
 	ax.set_title(title,size=10)
 
-	fig.savefig('test_confusion_matrix_{0}.pdf'.format(statsmodel))
+	#fig.savefig('test_confusion_matrix_{0}.pdf'.format(statsmodel))
 
 	diff=np.abs(np.log(output.ix[:,:len(time_points)*4])-output_true)
 
@@ -286,7 +300,7 @@ for output,results,statsmodel in zip([output_gaussian,output_nbinom],[results_ga
 		yr=np.percentile(y[ok],[1,99])
 		ax.hexbin(x[ok],y[ok],extent=(xr[0],xr[1],yr[0],yr[1]),bins='log',mincnt=1,vmin=-1)
 		ax.plot(np.linspace(xr[0],xr[1],100),np.linspace(xr[0],xr[1],100),'r-',lw=.5)
-        ax.set_title('{0}: r={1:.2f}'.format(r,scipy.stats.spearmanr(x,y)[0]),size=10)
+		ax.set_title('{0}: r={1:.2f}'.format(r,scipy.stats.spearmanr(x,y)[0]),size=10)
 		if n > 1:
 			ax.set_xlabel('log true value')
 		if n%2==0:
