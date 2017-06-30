@@ -297,10 +297,13 @@ def steady_state_residuals (x, vals, nf, T, time_points, model_pars, use_precurs
     """ residuals between observed and expected values """
 
     nrates=2
+    ncols=3
     if use_precursor:
         nrates+=1
+        ncols+=3
     if use_ribo:
         nrates+=1
+        ncols+=1
 
     times=np.array(map(float,time_points))
     ntimes=len(times)
@@ -322,14 +325,14 @@ def steady_state_residuals (x, vals, nf, T, time_points, model_pars, use_precurs
     if use_ribo and 'delta' in model_pars:
         log_rates[nrates-1]+=x[nrates+k]*times
     
-    res=0
-    # add up model residuals for each time point and each replicate
+    res=np.zeros(ncols)
+    # add up model residuals for each time point and each replicate, for each column separately
     for i in range(len(times)):
 
         # instantaneous values of the rates at time t
         log_rates_here=np.array([lr[i] for lr in log_rates])
         exp_mean=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo)
-        res+=np.sum((vals[i]*nf[i]-exp_mean)**2)
+        res+=np.sum((vals[i]*nf[i]-exp_mean)**2,axis=0)
 
     if res is np.nan:
         raise Exception("invalid value in steady_state_log_likelihood!")
@@ -345,6 +348,7 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
     use_ribo='R' in model
 
     nrates=2+use_precursor+use_ribo
+    ncols=3+3*use_precursor+use_ribo
 
     if not model.endswith('all'):
 
@@ -383,7 +387,8 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
 
         # get sums of squares for coefficient of determination
         SSres=steady_state_residuals(res.x,vals,nf,T,time_points,model_pars,use_precursor,use_ribo)
-        SStot=np.sum((vals*nf-np.mean(vals*nf))**2)
+        mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
+        SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
 
         # collect results
         result=dict(est_pars=pd.Series(res.x,index=model_pars),\
@@ -404,7 +409,7 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
         messages=[]
         success=True
         messages=[]
-        SSres=0
+        SSres=np.zeros(ncols)
 
         if parent is None:
             # take prior estimates for each time point
@@ -438,7 +443,6 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
                                         args=args, \
                                         **min_args)
 
-            # get sums of squares for coefficient of determination
             SSres+=steady_state_residuals(res.x,vals[i,None],nf[i,None],T,[t],model_pars,use_precursor,use_ribo)
             x.append(res.x)
             messages.append(res.message)
@@ -447,7 +451,8 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
             messages.append(res.message)
             npars+=len(model_pars)
 
-        SStot=np.sum((vals*nf-np.mean(vals*nf))**2)
+        mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
+        SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
         result=dict(est_pars=pd.DataFrame(x,columns=model_pars,index=time_points),\
                         L=L,\
                         R2=1-SSres/SStot,\
@@ -806,8 +811,7 @@ def collect_results (results, time_points, sig_level=0.01):
             [('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'log_c0']) if 'log_c0' in pars else np.nan) for t in time_points]+\
             [('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'log_d0']) if 'log_d0' in pars else np.nan) for t in time_points]
         tmp+=[('initial_logL',initial_fit['L']),\
-              ('initial_R2',initial_fit['R2']),\
-              ('initial_R2adj',initial_fit['R2adj']),\
+              ('initial_R2',','.join('{0:.3f}'.format(r2) for r2 in initial_fit['R2'])),\
               ('initial_fit_success',initial_fit['success']),\
               ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
               ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
@@ -829,8 +833,7 @@ def collect_results (results, time_points, sig_level=0.01):
              ('processing_log2FC',pars['gamma']/np.log(2) if 'gamma' in pars else 0),\
              ('translation_log2FC',pars['delta']/np.log(2) if 'delta' in pars else 0),\
              ('modeled_logL',best_fit['L']),\
-             ('modeled_R2',best_fit['R2']),\
-             ('modeled_R2adj',best_fit['R2adj']),\
+             ('modeled_R2',','.join('{0:.3f}'.format(r2) for r2 in best_fit['R2'])),\
              ('modeled_fit_success',best_fit['success']),\
              ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
              ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\

@@ -22,7 +22,7 @@ true_priors=pd.DataFrame(dict(mu=np.array([5,-1.5,.6,0,.02,.02,.02,.02]),\
                          index=['log_a0','log_b0','log_c0','log_d0','alpha','beta','gamma','delta'])
 
 # distribute models over genes, make sure most genes don't change for multiple testing correction to work (other model types than MPR don't really work here)
-true_gene_class=['MPR_0']*2000+\
+true_gene_class=['MPR_0']*1259+\
     ['MPR_a']*250+\
     ['MPR_b']*250+\
     ['MPR_c']*250+\
@@ -39,7 +39,8 @@ true_gene_class=['MPR_0']*2000+\
     ['MPR_bcd']*9+\
     ['MPR_abcd']*7
 
-true_gene_class=['MPR_0']*1900+['MPR_a']*100
+true_gene_class=['MPR_0']*1500+['MPR_all']*500
+#true_gene_class=['MPR_0']*100
 
 # define time points
 time_points=['0','12','24','36','48']
@@ -53,6 +54,11 @@ T=1
 # parameters of dispersion curve (set intercept=1 and slope=0 for Poisson model)
 slope,intercept=0.01,2
 #slope,intercept=0,1
+
+# some flags to control behavior
+use_length_library_bias=False
+used_true_priors=True
+do_direct_fits=True
 
 # model definition (same as in RNAkira)
 
@@ -137,8 +143,7 @@ for ng,gene in enumerate(genes):
 
     print >> sys.stderr, '[test_RNAkira] {0} genes initialized\r'.format(ng+1),
 
-    #lf=1.-np.exp(-gene_stats.ix[gene,'exon_length']/1.)
-    lf=1
+    lf=1.-np.exp(-gene_stats.ix[gene,'exon_length']/1.)
 
     model=true_gene_class[gene]
     if model=='MPR_all':
@@ -171,8 +176,10 @@ for ng,gene in enumerate(genes):
 
         mu=RNAkira.get_steady_state_values([r[i] for r in rates],T,use_precursor='P' in model, use_ribo='R' in model)
         # multiply by gene length, introduce length-dependent 4sU incorporation bias and library size effect
-        # mu_eff=mu*gene_stats.ix[gene,'exon_length']/1.e3/np.array([1.-sf,sf,1.,1.-sf,sf,1.,1.])/np.array([lf,1,1,1,1,1,1])
-        mu_eff=mu
+        if use_length_library_bias:
+            mu_eff=mu*gene_stats.ix[gene,'exon_length']/1.e3/np.array([1.-sf,sf,1.,1.-sf,sf,1.,1.])/np.array([lf,1,1,1,1,1,1])
+        else:
+            mu_eff=mu
 
         for n in range(len(mu)):
             d=(intercept-1)/mu_eff[n]+slope
@@ -188,28 +195,30 @@ for ng,gene in enumerate(genes):
     stddev[gene]=std
     disp[gene]=dsp
 
-    vals_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-    std_here=std.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
-    disp_here=dsp.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
-    nf_here=np.ones_like(vals_here)
+    if do_direct_fits:
 
-    resg={}
-    resg['all']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'gaussian',min_args)
-    resg['0']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['all'],'MPR_0',model_pars['MPR_0'],'gaussian',min_args)
-    resg['a']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['0'],'MPR_a',model_pars['MPR_a'],'gaussian',min_args)
-    resg['ab']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['a'],'MPR_ab',model_pars['MPR_ab'],'gaussian',min_args)
-    resg['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['ab'],'MPR_abc',model_pars['MPR_abc'],'gaussian',min_args)
-    resg['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['abc'],'MPR_abcd',model_pars['MPR_abcd'],'gaussian',min_args)
+        vals_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
+        std_here=std.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
+        disp_here=dsp.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
+        nf_here=np.ones_like(vals_here)
 
-    resn={}
-    resn['all']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'nbinom',min_args)
-    resn['0']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['all'],'MPR_0',model_pars['MPR_0'],'nbinom',min_args)
-    resn['a']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['0'],'MPR_a',model_pars['MPR_a'],'nbinom',min_args)
-    resn['ab']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['a'],'MPR_ab',model_pars['MPR_ab'],'nbinom',min_args)
-    resn['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['ab'],'MPR_abc',model_pars['MPR_abc'],'nbinom',min_args)
-    resn['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['abc'],'MPR_abcd',model_pars['MPR_abcd'],'nbinom',min_args)
+        resg={}
+        resg['all']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'gaussian',min_args)
+        resg['0']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['all'],'MPR_0',model_pars['MPR_0'],'gaussian',min_args)
+        resg['a']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['0'],'MPR_a',model_pars['MPR_a'],'gaussian',min_args)
+        resg['ab']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['a'],'MPR_ab',model_pars['MPR_ab'],'gaussian',min_args)
+        resg['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['ab'],'MPR_abc',model_pars['MPR_abc'],'gaussian',min_args)
+        resg['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T,time_points,true_priors,resg['abc'],'MPR_abcd',model_pars['MPR_abcd'],'gaussian',min_args)
 
-    raise Exception('stop')
+        resn={}
+        resn['all']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,None,'MPR_all',model_pars['MPR_all'],'nbinom',min_args)
+        resn['0']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['all'],'MPR_0',model_pars['MPR_0'],'nbinom',min_args)
+        resn['a']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['0'],'MPR_a',model_pars['MPR_a'],'nbinom',min_args)
+        resn['ab']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['a'],'MPR_ab',model_pars['MPR_ab'],'nbinom',min_args)
+        resn['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['ab'],'MPR_abc',model_pars['MPR_abc'],'nbinom',min_args)
+        resn['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T,time_points,true_priors,resn['abc'],'MPR_abcd',model_pars['MPR_abcd'],'nbinom',min_args)
+
+        raise Exception('stop')
 
 print >> sys.stderr, ''
 
@@ -217,27 +226,30 @@ counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
-LF=gene_stats['exon_length']/1.e3
-
-# normalize by "sequencing depth"
-elu_factor=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
-flowthrough_factor=(counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
-unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
-ribo_factor=counts['ribo'].sum(axis=0)/1.e6
-SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
-              elu_factor,flowthrough_factor,unlabeled_factor,\
-              ribo_factor],axis=0,keys=cols)
-
-#CF=RNAkira.normalize_elu_flowthrough(counts.divide(LF,axis=0).divide(SF,axis=1).fillna(1),samples,gene_stats,fig_name='test_TPM_correction.pdf')
-#NF=CF.divide(LF,axis=0).divide(SF,axis=1).fillna(1)
-NF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
+if use_length_library_bias:
+    LF=gene_stats['exon_length']/1.e3
+    # normalize by "sequencing depth"
+    elu_factor=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
+    flowthrough_factor=(counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
+    unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
+    ribo_factor=counts['ribo'].sum(axis=0)/1.e6
+    SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
+                  elu_factor,flowthrough_factor,unlabeled_factor,\
+                  ribo_factor],axis=0,keys=cols)
+    CF=RNAkira.normalize_elu_flowthrough(counts.divide(LF,axis=0).divide(SF,axis=1).fillna(1),samples,gene_stats,fig_name='test_TPM_correction.pdf')
+    NF=CF.divide(LF,axis=0).divide(SF,axis=1).fillna(1)
+else:
+    LF=pd.Series(1,index=LF.index)
+    SF=pd.Series(1,index=SF.index)
+    NF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
 
 TPM=counts.multiply(NF)
-#stddev=RNAkira.estimate_stddev (TPM,fig_name='test_variability_stddev.pdf')
-#disp=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),fig_name='test_variability_disp.pdf')
+if use_length_library_bias:
+    stddev=RNAkira.estimate_stddev (TPM,fig_name='test_variability_stddev.pdf')
+    disp=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),fig_name='test_variability_disp.pdf')
 
-results_gaussian=RNAkira.RNAkira(counts, stddev, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='gaussian', priors=true_priors)
-results_nbinom=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='nbinom', priors=true_priors)
+results_gaussian=RNAkira.RNAkira(counts, stddev, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='gaussian', priors=true_priors if use_true_priors else None)
+results_nbinom=RNAkira.RNAkira(counts, disp, NF, T, sig_level=sig_level, min_ribo=.1, min_precursor=.1, maxlevel=options.maxlevel, statsmodel='nbinom', priors=true_priors if use_true_priors else None)
 
 output_gaussian=RNAkira.collect_results(results_gaussian, time_points, sig_level=sig_level)
 output_nbinom=RNAkira.collect_results(results_nbinom, time_points, sig_level=sig_level)
