@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+from string import maketrans
 import itertools
 import scipy.stats
 import scipy.interpolate
@@ -46,13 +47,41 @@ def odr_regression(xvals,yvals,beta0=[1,0]):
     myodr=scipy.odr.ODR(data,linear,beta0=beta0)
     return myodr.run().beta
 
-def get_steady_state_values (x, T, use_precursor, use_ribo, use_deriv=False):
+def get_model_definitions(nlevels):
+
+    """ returns a nested hierarchy of models (uppercase denotes variable, lowercase constant rates) """
+
+    model_types=['abcd','abd','abc','ab']
+    # define nested hierarchy of models (model name & parent models)
+    models=OrderedDict()
+    for level in range(nlevels):
+        level_models=OrderedDict()
+        for pars in model_types:
+            if level==0:
+                level_models.update({pars.upper(): []})
+            elif level==1:
+                level_models.update({pars: ([pars.upper()])})
+            elif level <= len(pars):
+                # get all combination of the variable pars
+                for pc in itertools.combinations(pars,level-1):
+                    # find parent model that use a subset of these parameters
+                    if level==2:
+                        parent_models=[pars]
+                    else:
+                        parent_models=[pars.translate(maketrans(''.join(x),''.join(x).upper())) for x in itertools.combinations(pars,level-2) if set(x) < set(pc)]
+                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): parent_models})
+        models.update({level: level_models})
+
+    return models
+
+def get_steady_state_values (x, T, model, use_deriv=False):
 
     """ given synthesis, degradation, processing rates and translation efficiencies x=(a,b,c,d) and labeling time T
-    returns instantaneous steady-state values for elu, flowthrough, unlabeled mature
-    including precursors if use_precursor is set
-    ribo if use_ribo is set
+    returns instantaneous steady-state values for elu, flowthrough, unlabeled mature including precursors and ribo depending on model
     includes derivatives w.r.t. log(a),log(b),log(c) and log(d) if use_deriv is set """
+
+    use_precursor='c' in model.lower()
+    use_ribo='d' in model.lower()
 
     if use_precursor:
 
@@ -153,116 +182,70 @@ def get_steady_state_values (x, T, use_precursor, use_ribo, use_deriv=False):
                 exp_mean_deriv=[exp_mean_deriv[i]+exp_mean_ribo_deriv[i] for i in range(3)]
 
     if use_deriv:
-        return (np.array(exp_mean),map(np.array,exp_mean_deriv))
+        return (np.array(exp_mean),np.array(exp_mean_deriv))
     else:
         return np.array(exp_mean)
 
-def get_rates(time_points, pars):
+def get_rates (x, ntimes, model):
 
-    """ expands log rates over time points given rate change parameters """
+    """ expands log rates over time points given rate parameters x, number of time points, and model """
 
-    times=np.array(map(float,time_points))
-    ntimes=len(times)
+    nrates=len(model)
+
+    # get instantaneous rates a,b,c,d at each timepoint by expanding the ones that don't vary over time
+    log_rates=np.zeros((nrates,ntimes))
+    k=0
+    for n,mp in enumerate(model):
+        # uppercase letters in the model definition mean this parameter varies over time
+        if mp.isupper():
+            log_rates[n]=x[k:k+ntimes]
+            k+=ntimes
+        else:
+            log_rates[n]=x[k]
+            k+=1
     
-    # exponential trend in rates modeled by slopes alpha, beta, gamma and maybe delta (log rates have linear trend)
-
-    log_a=pars['log_a0']*np.ones(ntimes)
-    if 'alpha' in pars:
-        log_a+=pars['alpha']*times
-    log_b=pars['log_b0']*np.ones(ntimes)
-    if 'beta' in pars:
-        log_b+=pars['beta']*times
-
-    rates=[log_a,log_b]
-
-    if 'log_c0' in pars:
-        log_c=pars['log_c0']*np.ones(ntimes)
-        if 'gamma' in pars:
-            log_c+=pars['gamma']*times
-        rates.append(log_c)
-
-    if 'log_d0' in pars:
-        log_d=pars['log_d0']*np.ones(ntimes)
-        if 'delta' in pars:
-            log_d+=pars['delta']*times
-        rates.append(log_d)
-
-    return rates
-
+    return log_rates.T
         
-def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, prior_std, model_pars, use_precursor, use_ribo, statsmodel, use_deriv):
+def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, prior_std, model, statsmodel, use_deriv):
 
     """ log-likelihood function for difference between expected and observed values, including all priors """
 
-    nrates=2
-    if use_precursor:
-        nrates+=1
-    if use_ribo:
-        nrates+=1
-
-    times=np.array(map(float,time_points))
-    ntimes=len(times)
-
-    # get instantaneous rates a,b,c,d at each timepoint
-    log_rates=[x[i]*np.ones(ntimes) for i in range(nrates)]
-    k=0
-    if 'alpha' in model_pars:
-        log_rates[0]+=x[nrates+k]*times
-        k+=1
-    if 'beta' in model_pars:
-        log_rates[1]+=x[nrates+k]*times
-        k+=1
-
-    if use_precursor and 'gamma' in model_pars:
-        log_rates[2]+=x[nrates+k]*times
-        k+=1
-
-    if use_ribo and 'delta' in model_pars:
-        log_rates[nrates-1]+=x[nrates+k]*times
+    ntimes=len(time_points)
 
     fun=0
+    log_rates=get_rates(x, ntimes, model)
     if use_deriv:
         grad=np.zeros(len(x))
+        # index array for gradient vector knows on which parameters vary over time
+        gg=defaultdict(list)
+        k=0
+        for n,mp in enumerate(model):
+            if mp.isupper():
+                for i,t in enumerate(time_points):
+                    gg[t].append(k+i)
+                k+=ntimes
+            else:
+                for t in time_points:
+                    gg[t].append(k)
+                k+=1
+        gg=dict((k,np.array(v)) for k,v in gg.iteritems())
 
     # add up model log-likelihoods for each time point and each replicate
-    for i,t in enumerate(times):
+    for i,t in enumerate(time_points):
 
-        # instantaneous values of the rates at time t
-        log_rates_here=np.array([lr[i] for lr in log_rates])
-
-        # first add to log-likelihood the priors on rates at each time point from empirical distribution (parametrized by mu and std)
-        diff=log_rates_here-prior_mu
+        # first add to log-likelihood the priors on rates at each time point (normal distribution with mu and std)
+        diff=log_rates[i]-prior_mu
         fun+=np.sum(-.5*(diff/prior_std)**2-.5*np.log(2.*np.pi)-np.log(prior_std))
 
         if use_deriv:
+            # add derivatives of rate parameters
+            grad[gg[t]]+=(-diff/prior_std**2)
 
-            g=list(-diff/prior_std**2)
-            # derivatives w.r.t. alpha etc.
-            if 'alpha' in model_pars:
-                g.append(g[0]*t)
-            if 'beta' in model_pars:
-                g.append(g[1]*t)
-            if 'gamma' in model_pars:
-                g.append(g[2]*t)
-            if 'delta' in model_pars:
-                g.append(g[nrates-1]*t)
-            grad+=np.array(g)
-
+        # get expected mean values (and their derivatives)
         if use_deriv:
-            exp_mean,exp_mean_deriv=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo,use_deriv)
-
-            # add derivatives w.r.t. alpha etc. if necessary
-            if 'alpha' in model_pars:
-                exp_mean_deriv.append(exp_mean_deriv[0]*t)
-            if 'beta' in model_pars:
-                exp_mean_deriv.append(exp_mean_deriv[1]*t)
-            if 'gamma' in model_pars:
-                exp_mean_deriv.append(exp_mean_deriv[2]*t)
-            if 'delta' in model_pars:
-                exp_mean_deriv.append(exp_mean_deriv[nrates-1]*t)
+            exp_mean,exp_mean_deriv=get_steady_state_values(log_rates[i],T,model,use_deriv)
         else:
-
-            exp_mean=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo)
+            exp_mean=get_steady_state_values(log_rates[i],T,model)
 
         if statsmodel=='gaussian':
             # here "var" is stddev
@@ -270,7 +253,7 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
             #fun+=np.sum(-.5*(diff/var[i])**2-.5*np.log(2.*np.pi)-np.log(var[i]))
             fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var[i]))
             if use_deriv:
-                grad+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2,axis=0))
+                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2,axis=0))
 
         elif statsmodel=='nbinom':
             # here "var" is dispersion
@@ -280,7 +263,7 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
             fun+=np.sum(scipy.stats.nbinom.logpmf(vals[i],nn,pp))
             if use_deriv:
                 tmp=(vals[i]-nn*var[i]*mu)/(exp_mean*(1.+var[i]*mu))
-                grad+=np.dot(exp_mean_deriv,np.sum(tmp,axis=0))
+                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(tmp,axis=0))
 
     if fun is np.nan:
         raise Exception("invalid value in steady_state_log_likelihood!")
@@ -292,175 +275,80 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
         # return negative log likelihood
         return -fun
 
-def steady_state_residuals (x, vals, nf, T, time_points, model_pars, use_precursor, use_ribo):
+def steady_state_residuals (x, vals, nf, T, time_points, model):
 
-    """ residuals between observed and expected values """
+    """ residuals between observed and expected values for each fraction separately"""
 
-    nrates=2
-    ncols=3
-    if use_precursor:
-        nrates+=1
-        ncols+=3
-    if use_ribo:
-        nrates+=1
-        ncols+=1
-
-    times=np.array(map(float,time_points))
-    ntimes=len(times)
-
-    # get instantaneous rates a,b,c,d at each timepoint
-    log_rates=[x[i]*np.ones(ntimes) for i in range(nrates)]
-    k=0
-    if 'alpha' in model_pars:
-        log_rates[0]+=x[nrates+k]*times
-        k+=1
-    if 'beta' in model_pars:
-        log_rates[1]+=x[nrates+k]*times
-        k+=1
-
-    if use_precursor and 'gamma' in model_pars:
-        log_rates[2]+=x[nrates+k]*times
-        k+=1
-
-    if use_ribo and 'delta' in model_pars:
-        log_rates[nrates-1]+=x[nrates+k]*times
+    ntimes=len(time_points)
+    log_rates=get_rates(x, ntimes, model)
+    ncols=3+3*('c' in model.lower())+('d' in model.lower())
     
     res=np.zeros(ncols)
-    # add up model residuals for each time point and each replicate, for each column separately
-    for i in range(len(times)):
-
-        # instantaneous values of the rates at time t
-        log_rates_here=np.array([lr[i] for lr in log_rates])
-        exp_mean=get_steady_state_values(log_rates_here,T,use_precursor,use_ribo)
+    # add up model residuals for each time point and each replicate
+    for i in range(ntimes):
+        exp_mean=get_steady_state_values(log_rates[i],T,model)
         res+=np.sum((vals[i]*nf[i]-exp_mean)**2,axis=0)
 
     if res is np.nan:
-        raise Exception("invalid value in steady_state_log_likelihood!")
+        raise Exception("invalid value in steady_state_residuals")
 
     return res
 
-def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model_pars, statsmodel, min_args):
+def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel, min_args, test_gradient=False):
 
-    """ fits a specific model to data """
+    """ fits a specific model to data given variance, normalization factors, labeling time, time points, priors, initial estimate from a parent model etc. """
 
-    test_gradient=False
-    use_precursor='P' in model
-    use_ribo='R' in model
+    ntimes=len(time_points)
+    nrates=sum(ntimes if mp.isupper() else 1 for mp in model)
+    ncols=3+3*('c' in model.lower())+('d' in model.lower())
+    iRNA=2
+    iribo=3+3*('c' in model.lower())
 
-    nrates=2+use_precursor+use_ribo
-    ncols=3+3*use_precursor+use_ribo
-
-    if not model.endswith('all'):
-
-        # for most models, fit all time points simultaneously, using constant or linear trends on the rates
-        if parent is not None:
-            if model.endswith('0'):
-                initial_estimate=parent['est_pars'].mean(axis=0)
-            else:
-                initial_estimate=np.concatenate([parent['est_pars'],[0]])
+    if parent is not None:
+        if model.lower()==model:
+            initial_estimate=parent['est_pars'].mean(axis=0)
         else:
-            # use initial estimate from priors
-            raise Exception("shouldn't happen?")
-            initial_estimate=np.concatenate([model_priors['mu'].values,[0]*(len(model_pars)-nrates)])
-
-        # arguments to minimization
-        args=(vals, var, nf, T, time_points, model_priors['mu'].values[:nrates], 
-              model_priors['std'].values[:nrates], model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
-
-        # test gradient against numerical difference if necessary
-        if test_gradient:
-
-            pp=initial_estimate
-            eps=1.e-6*np.abs(initial_estimate)+1.e-8
-            fun,grad=steady_state_log_likelihood(pp,*args)
-            my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
-                               -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
-            diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-            if diff > 1.e-7:
-                raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
-
-        # perform minimization
-        res=scipy.optimize.minimize(steady_state_log_likelihood, \
-                                    initial_estimate,\
-                                    args=args, \
-                                    **min_args)
-
-        # get sums of squares for coefficient of determination
-        SSres=steady_state_residuals(res.x,vals,nf,T,time_points,model_pars,use_precursor,use_ribo)
-        mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
-        SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
-
-        # collect results
-        result=dict(est_pars=pd.Series(res.x,index=model_pars),\
-                    L=-res.fun,\
-                    R2=1-SSres/SStot,\
-                    R2adj=1-SSres/SStot*(1+len(model_pars)/(np.prod(vals.shape)-len(model_pars)-1)),\
-                    success=res.success,\
-                    message=res.message,\
-                    npars=len(model_pars),
-                    model=model)
-
+            initial_estimate=np.concatenate([parent['est_pars'][mp.lower()] if mp.isupper() else [parent['est_pars'][mp.lower()].mean()] for mp in model])
     else:
+        # use initial estimate from priors
+        initial_estimate=np.repeat(priors['mu'].values,ntimes)
 
-        # in the 'all' models, treat every time point independently
-        x=[]
-        L=0
-        npars=0
-        messages=[]
-        success=True
-        messages=[]
-        SSres=np.zeros(ncols)
+    # arguments to minimization
+    args=(vals, var, nf, T, time_points, priors['mu'].values, priors['std'].values, model, statsmodel, min_args['jac'])
 
-        if parent is None:
-            # take prior estimates for each time point
-            log_rates=[model_priors['mu'].ix[k]*np.ones(len(time_points)) for k in range(nrates)]
-        else:
-            
-            initial_pars=parent['est_pars']
-            log_rates=get_rates(time_points,initial_pars)
+    # test gradient against numerical difference if necessary
+    if test_gradient:
 
-        for i,t in enumerate(time_points):
+        pp=initial_estimate
+        eps=1.e-6*np.abs(initial_estimate)+1.e-8
+        fun,grad=steady_state_log_likelihood(pp,*args)
+        my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
+                           -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
+        diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
+        if diff > 1.e-7:
+            raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
 
-            initial_estimate=np.array([lr[i] for lr in log_rates])
+    # perform minimization
+    res=scipy.optimize.minimize(steady_state_log_likelihood, \
+                                initial_estimate,\
+                                args=args, \
+                                **min_args)
 
-            args=(vals[i,None], var[i,None], nf[i,None], T, [t], model_priors['mu'].values[:nrates], \
-                  model_priors['std'].values[:nrates], model_pars, use_precursor, use_ribo, statsmodel, min_args['jac'])
+    # get sums of squares for coefficient of determination
+    SSres=steady_state_residuals(res.x,vals,nf,T,time_points,model)
+    mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
+    SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
 
-            # test gradient against numerical difference if necessary
-            if test_gradient:
-
-                pp=initial_estimate
-                eps=1.e-6*np.abs(initial_estimate)+1.e-8
-                fun,grad=steady_state_log_likelihood(pp,*args)
-                my_grad=np.array([(steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]+eps[i]]+list(pp[i+1:])),*args)[0]\
-                                   -steady_state_log_likelihood(np.array(list(pp[:i])+[pp[i]-eps[i]]+list(pp[i+1:])),*args)[0])/(2*eps[i]) for i in range(len(pp))])
-                diff=np.sum((grad-my_grad)**2)/np.sum(grad**2)
-                if diff > 1.e-7:
-                    raise Warning('\n!!! gradient diff: {0:.3e}'.format(diff))
-
-            res=scipy.optimize.minimize(steady_state_log_likelihood, \
-                                        initial_estimate,\
-                                        args=args, \
-                                        **min_args)
-
-            SSres+=steady_state_residuals(res.x,vals[i,None],nf[i,None],T,[t],model_pars,use_precursor,use_ribo)
-            x.append(res.x)
-            messages.append(res.message)
-            L+=-res.fun
-            success=success & res.success
-            messages.append(res.message)
-            npars+=len(model_pars)
-
-        mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
-        SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
-        result=dict(est_pars=pd.DataFrame(x,columns=model_pars,index=time_points),\
-                        L=L,\
-                        R2=1-SSres/SStot,\
-                        R2adj=1-SSres/SStot*(1+npars/(np.prod(vals.shape)-npars-1)),\
-                        success=success,\
-                        message='; '.join(messages),\
-                        npars=npars,\
-                        model=model)
+    # collect results
+    rates=get_rates(res.x, ntimes, model)
+    result=dict(est_pars=pd.DataFrame(rates,columns=list(model.lower()),index=time_points),\
+                L=-res.fun,\
+                R2_RNA=(1-SSres/SStot)[iRNA],\
+                R2_ribo=(1-SSres/SStot)[iribo] if 'd' in model.lower() else np.nan,\
+                success=res.success,\
+                message=res.message,\
+                npars=len(res.x),
+                model=model)
 
     if parent is not None:
         # calculate p-value from LRT test using chi2 distribution
@@ -471,7 +359,7 @@ def fit_model (vals, var, nf, T, time_points, model_priors, parent, model, model
 
 def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, use_precursor, use_ribo, title='', priors=None, sig_level=0.01):
 
-    """ function to plot summary of results for a specific gene """
+    """ function to plot summary of results for a specific gene; NEEDS TO BE FIXED!! """
 
     import matplotlib
     matplotlib.use('Agg')
@@ -562,6 +450,7 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
 
     genes=vals.index
     time_points=np.unique(vals.columns.get_level_values(1))
+    ntimes=len(time_points)
     nreps=len(np.unique(vals.columns.get_level_values(2)))
 
     ndim=7
@@ -576,7 +465,7 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
     ribo_cols=['ribo']
 
     print >> sys.stderr, '[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
-    print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates and {2} model'.format(len(time_points),nreps,statsmodel)
+    print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates and {2} model'.format(ntimes,nreps,statsmodel)
 
     #min_args=dict(method='L-BFGS-B',jac=False,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
     min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
@@ -584,49 +473,9 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
     if maxlevel is not None:
         nlevels=maxlevel+1
     else:
-        nlevels=6
+        nlevels=4
 
-    mature_pars=['log_a0','log_b0']
-    precursor_pars=['log_c0']
-    ribo_pars=['log_d0']
-
-    model_types=['MPR','MR','MP','M']
-
-    fixed_pars=dict(MPR=mature_pars+precursor_pars+ribo_pars,\
-                    MR=mature_pars+ribo_pars,\
-                    MP=mature_pars+precursor_pars,\
-                    M=mature_pars)
-
-    variable_pars=dict(MPR=['alpha','beta','gamma','delta'],\
-                       MR=['alpha','beta','delta'],\
-                       MP=['alpha','beta','gamma'],\
-                       M=['alpha','beta'])
-
-    par_code=dict(alpha='a',beta='b',gamma='c',delta='d')
-
-    # define nested hierarchy of models (model name, model parameters, parent models)
-    models=OrderedDict()
-    for level in range(nlevels):
-        level_models=OrderedDict()
-        for mt in model_types:
-            if level==0:
-                level_models.update({mt+'_all': (fixed_pars[mt],[])})
-            elif level==1:
-                level_models.update({mt+'_0': (fixed_pars[mt],[mt+'_all'])})
-            else:
-                fp=fixed_pars[mt]
-                vp=variable_pars[mt]
-                # get all combination of the variable pars
-                for par_comb in itertools.combinations(vp,level-1):
-                    # find parent model that use a subset of these parameters
-                    if level==2:
-                        parent_models=[mt+'_0']
-                    else:
-                        parent_models=[mt+'_'+''.join(par_code[p] for p in x) for x in itertools.combinations(vp,level-2) if set(x) < set(par_comb)]
-                    level_models.update({mt+'_'+''.join(par_code[p] for p in par_comb): (fixed_pars[mt]+list(par_comb),parent_models)})
-        models.update({level: level_models})
-        
-    model_pars=dict((m,v[0]) for l in range(nlevels) for m,v in models[l].iteritems())
+    models=get_model_definitions(nlevels)
 
     results=defaultdict(dict)
     all_results=defaultdict(dict)
@@ -645,13 +494,13 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
         take_ribo=take_mature & use_ribo & ((TPM['ribo'] > TPM['ribo'].quantile(.5)) & \
                                             (TPM['ribo'] < TPM['ribo'].quantile(.95))).any(axis=1)
 
-        log_a_est=np.log((TPM['elu-mature']+TPM['elu-precursor'])/T)[take_precursor].values.flatten()
-        log_b_est=np.log(np.log(1+TPM['elu-mature']/TPM['flowthrough-mature'])/T)[take_mature].values.flatten()
-        log_c_est=np.log(np.log(1+TPM['elu-precursor']/TPM['flowthrough-precursor'])/T)[take_precursor].values.flatten()
-        log_d_est=np.log(TPM['ribo']/TPM['unlabeled-mature'])[take_ribo].values.flatten()
+        log_a=np.log((TPM['elu-mature']+TPM['elu-precursor'])/T)[take_precursor].values.flatten()
+        log_b=np.log(np.log(1+TPM['elu-mature']/TPM['flowthrough-mature'])/T)[take_mature].values.flatten()
+        log_c=np.log(np.log(1+TPM['elu-precursor']/TPM['flowthrough-precursor'])/T)[take_precursor].values.flatten()
+        log_d=np.log(TPM['ribo']/TPM['unlabeled-mature'])[take_ribo].values.flatten()
 
-        model_priors=pd.DataFrame([trim_mean_std(x) for x in [log_a_est,log_b_est,log_c_est,log_d_est]],\
-                                  columns=['mu','std'],index=['log_a0','log_b0','log_c0','log_d0'])
+        model_priors=pd.DataFrame([trim_mean_std(x) for x in [log_a,log_b,log_c,log_d]],\
+                                  columns=['mu','std'],index=list('abcd'))
 
         if model_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")
@@ -666,45 +515,40 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
 
         niter+=1
 
-        print >> sys.stderr, '   est. priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*model_priors.ix[:4].values.flatten())
+        print >> sys.stderr, '   est. priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*model_priors.values.flatten())
 
         nfits=0
-        # do this for each gene
+        # fit full model for each gene
         for gene in genes:
 
             print >> sys.stderr, '   iter {0}, {1} fits\r'.format(niter,nfits),
 
-            model='M'
+            model='AB'
             cols=mature_cols[:]
             if use_precursor[gene]:
                 cols+=precursor_cols[:]
-                model+='P'
+                model+='C'
             if use_ribo[gene]:
                 cols+=ribo_cols[:]
-                model+='R'
-            model+='_all'
+                model+='D'
 
-            model_pars,parent_models=models[level][model]
-            
             # make numpy arrays out of vals, var and NF for computational efficiency (therefore we need equal number of replicates for each time point!)
-            vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-            var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
-            nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
+            vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
+            var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,len(cols)))
+            nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
 
-            result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors, None, model, model_pars, statsmodel, min_args)
+            result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors.loc[list(model.lower())], None, model, statsmodel, min_args)
 
             results[gene][level]=result
             nfits+=1
 
         if priors is not None:
-            print >> sys.stderr, '   done: {0} fits\r'.format(nfits)
+            print >> sys.stderr, '   done: {0} fits     \r'.format(nfits)
             break
 
-        model_pars,_=models[0]['MPR_all']
-        new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][x] for gene in genes \
-                                                         if results[gene][level]['success'] and \
-                                                         x in results[gene][level]['est_pars']])) for x in model_pars],\
-                                columns=['mu','std'],index=model_pars)
+        new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][mp] for gene in genes \
+                                                         if results[gene][level]['success'] and mp in results[gene][level]['est_pars']]))\
+                                 for mp in model.lower()],columns=['mu','std'],index=list(model.lower()))
 
         if new_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")
@@ -725,12 +569,12 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
     for level in range(1,nlevels):
 
         level_results=defaultdict(dict)
-        for model,(model_pars,parent_models) in models[level].iteritems():
+        for model,parent_models in models[level].iteritems():
 
             model_results=dict()
             nfits=0
             # do this for each gene
-            for gene in genes[(use_ribo if 'R' in model else ~use_ribo) & (use_precursor if 'P' in model else ~use_precursor)]:
+            for gene in genes[(use_ribo if 'd' in model.lower() else ~use_ribo) & (use_precursor if 'c' in model.lower() else ~use_precursor)]:
 
                 cols=mature_cols[:]
                 if use_precursor[gene]:
@@ -739,11 +583,6 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
                     cols+=ribo_cols[:]
 
                 print >> sys.stderr, '   model: {0}, {1} fits\r'.format(model,nfits),
-
-                # make numpy arrays out of vals, var and NF for computational efficiency
-                vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-                var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
-                nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
 
                 # use initial estimate from previous level
                 if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models:
@@ -755,7 +594,12 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
                 if level > 1 and not parent['LRT-q'] < sig_level:
                     continue
 
-                result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors, parent, model, model_pars, statsmodel, min_args)
+                # make numpy arrays out of vals, var and NF for computational efficiency
+                vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
+                var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,len(cols)))
+                nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
+
+                result=fit_model (vals_here, var_here, nf_here, T, time_points, model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
                 model_results[gene]=result
                 level_results[gene][model]=result
                 nfits+=1
@@ -790,7 +634,7 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
     nsig=sum(q < sig_level for q in qvals.values())
     for gene,q in qvals.iteritems():
         results[gene][0]['LRT-q']=q
-    print >> sys.stderr, '   model: all, {0} improved at FDR {1:.2g}\n'.format(nsig,sig_level)
+    print >> sys.stderr, '   model: AB(CD), {0} improved at FDR {1:.2g}\n'.format(nsig,sig_level)
 
     print >> sys.stderr, '[RNAkira] done'
 
@@ -806,44 +650,40 @@ def collect_results (results, time_points, sig_level=0.01):
         # first get initial fits
         initial_fit=res[0]
         pars=initial_fit['est_pars']
-        tmp=[('initial_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'log_a0'])) for t in time_points]+\
-            [('initial_degradation_t{0}'.format(t),np.exp(pars.ix[t,'log_b0'])) for t in time_points]+\
-            [('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'log_c0']) if 'log_c0' in pars else np.nan) for t in time_points]+\
-            [('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'log_d0']) if 'log_d0' in pars else np.nan) for t in time_points]
-        tmp+=[('initial_logL',initial_fit['L']),\
-              ('initial_R2',','.join('{0:.3f}'.format(r2) for r2 in initial_fit['R2'])),\
-              ('initial_fit_success',initial_fit['success']),\
-              ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
-              ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
-              ('initial_model',initial_fit['model'])]
+        tmp=[('initial_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
+            [('initial_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
+            [('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
+            [('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
+            [('initial_logL',initial_fit['L']),\
+             ('initial_R2_RNA',initial_fit['R2_RNA']),\
+             ('initial_R2_ribo',initial_fit['R2_ribo']),\
+             ('initial_fit_success',initial_fit['success']),\
+             ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
+             ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
+             ('initial_model',initial_fit['model'])]
 
         # take best significant model or constant otherwise
-        best_fit=filter(lambda x: (x['model'].endswith('0') or x['LRT-q'] < sig_level),res)[-1]
+        best_fit=filter(lambda x: (x['model'].islower() or x['LRT-q'] < sig_level),res)[-1]
         pars=best_fit['est_pars']
-        rates=get_rates(time_points,pars)
-        log_a,log_b=rates[:2]
-        log_c=rates[2] if 'log_c0' in pars else np.nan*np.ones(len(time_points))
-        log_d=rates[-1] if 'log_d0' in pars else np.nan*np.ones(len(time_points))
-        tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(log_a[i])) for i,t in enumerate(time_points)]+\
-            [('modeled_degradation_t{0}'.format(t),np.exp(log_b[i])) for i,t in enumerate(time_points)]+\
-            [('modeled_processing_t{0}'.format(t),np.exp(log_c[i])) for i,t in enumerate(time_points)]+\
-            [('modeled_translation_t{0}'.format(t),np.exp(log_d[i])) for i,t in enumerate(time_points)]+\
-            [('synthesis_log2FC',pars['alpha']/np.log(2) if 'alpha' in pars else 0),\
-             ('degradation_log2FC',pars['beta']/np.log(2) if 'beta' in pars else 0),\
-             ('processing_log2FC',pars['gamma']/np.log(2) if 'gamma' in pars else 0),\
-             ('translation_log2FC',pars['delta']/np.log(2) if 'delta' in pars else 0),\
-             ('modeled_logL',best_fit['L']),\
-             ('modeled_R2',','.join('{0:.3f}'.format(r2) for r2 in best_fit['R2'])),\
+        tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
+            [('modeled_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
+            [('modeled_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
+            [('modeled_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
+            [('modeled_logL',best_fit['L']),\
+             ('modeled_R2_RNA',best_fit['R2_RNA']),\
+             ('modeled_R2_ribo',best_fit['R2_ribo']),\
              ('modeled_fit_success',best_fit['success']),\
              ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
              ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
              ('best_model',best_fit['model'])]
-
+        
         output[gene]=OrderedDict(tmp)
 
     return pd.DataFrame.from_dict(output,orient='index')
 
 def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
+
+    """ corrects 4sU incorporation bias and fixes library size normalization of TPM values """
 
     if fig_name is not None:
         import matplotlib
@@ -851,8 +691,6 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
         from matplotlib import pyplot as plt
         fig=plt.figure(figsize=(8,3*len(samples)))
         fig.subplots_adjust(bottom=.02,top=.98,hspace=.4,wspace=.3)
-
-    """ corrects 4sU incorporation bias and fixes library size normalization of TPM values """
 
     print >> sys.stderr, '\n[normalize_elu_flowthrough] correcting for 4sU incorporation bias and normalizing by linear regression'
 
@@ -890,16 +728,10 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, fig_name=None):
         y=2**log2_FT_ratio[ok]
         X=np.c_[x,np.ones(ok.sum())]
 
-        #w=np.log2(1.+TPM['unlabeled-mature',t,r])
-        #wls=statsmodels.regression.linear_model.WLS(y,X,weights=w[ok]/w.sum())
-        #slope,intercept=wls.fit().params
-        #slope,intercept,_,_,_=scipy.stats.linregress(x,y)
         slope,intercept=odr_regression(x,y,[-1,1])
 
         if intercept < 0 or slope > 0:
             raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
-        #else:
-        #   print >> sys.stderr, 'mean u-corr: {0:.2g}, slope={1:.2g}, intercept={2:.2g}'.format(np.nanmean(ucorr)/np.nanmean(log2_elu_ratio),slope,intercept)
 
         # normalization factors for introns
         CF['elu-precursor',t,r]=-slope/intercept
@@ -952,6 +784,7 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
 
     cols=counts.columns.get_level_values(0).unique()
     time_points=counts.columns.get_level_values(1).unique()
+    ntimes=len(time_points)
     disp=pd.DataFrame(1,index=counts.index,columns=pd.MultiIndex.from_product([cols,time_points]))
     reps=counts.columns.get_level_values(2).unique()
     nreps=len(reps)
@@ -973,7 +806,6 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
         # get dispersion trend for genes with positive values
         ok=(mean_counts_within.values > 0) &\
             (mean_counts_within.values < var_counts_within.values)
-        #slope,intercept,_,_,_=scipy.stats.linregress(mean_counts[ok],(var_counts/mean_counts)[ok])
         y=(var_counts_within/mean_counts_within).values[ok]
         X=np.c_[mean_counts_within.values[ok],np.ones(ok.sum())]
         wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
@@ -982,7 +814,6 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
         disp_smooth[disp_smooth < 0]=0
         disp_act_within=((var_counts_within-mean_counts_within)/mean_counts_within**2).replace([np.inf,-np.inf],np.nan)
         # estimated dispersion is weighted average of real and smoothened
-        #disp_est=np.exp((1.-weight/nreps)*np.log(disp_act_within)+weight*np.log(disp_smooth)/nreps)
         disp_est=(1.-weight/nreps)*disp_act_within+weight*disp_smooth/nreps
 
         # if estimated dispersion is negative or NaN, use across-sample estimate
@@ -999,9 +830,8 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
             slope_all,intercept_all=wls.fit().params
             disp_smooth=(intercept_all-1)/mean_counts_all+slope_all
             disp_act_all=(var_counts_all-mean_counts_all)/mean_counts_all**2
-            #repl=np.exp((1.-weight/nreps)*np.log(disp_act_all)+weight*np.log(disp_smooth)/nreps)[replace]
             repl=((1.-weight/nreps)*disp_act_all+weight*disp_smooth/nreps)[replace]
-            disp_est[replace]=pd.concat([repl]*len(time_points),axis=1,keys=time_points)
+            disp_est[replace]=pd.concat([repl]*ntimes,axis=1,keys=time_points)
 
         # NaN values only where mean = 0
         disp[c]=disp_est.fillna(1)
@@ -1039,6 +869,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
 
     cols=TPM.columns.get_level_values(0).unique()
     time_points=TPM.columns.get_level_values(1).unique()
+    ntimes=len(time_points)
     stddev=pd.DataFrame(1,index=TPM.index,columns=pd.MultiIndex.from_product([cols,time_points]))
     reps=TPM.columns.get_level_values(2).unique()
     nreps=len(reps)
@@ -1088,7 +919,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
             interp_all=scipy.interpolate.interp1d(lowess_all[0],lowess_all[1],bounds_error=False)
 
             repl=((1.-weight/nreps)*log10_std_all+weight*(interp_all(log10_means_all)+log10_means_all)/nreps)[replace]
-            log10_std_est[replace]=pd.concat([repl]*len(time_points),axis=1,keys=time_points)
+            log10_std_est[replace]=pd.concat([repl]*ntimes,axis=1,keys=time_points)
 
         # add estimated std dev (NaN values only where mean=0)
         stddev[c]=10**log10_std_est.fillna(1)
@@ -1145,7 +976,7 @@ if __name__ == '__main__':
     parser.add_option('-T','--labeling_time',dest='T',help="labeling time",type=float)
     parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
     parser.add_option('','--alpha',dest='alpha',help="FDR cutoff [0.05]",default=0.05,type=float)
-    parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
+    parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
@@ -1229,7 +1060,7 @@ if __name__ == '__main__':
         elu_factor=counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0)/1.e6
         flowthrough_factor=counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0)/1.e6
         unlabeled_factor=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
-        # for ribo, do as usual
+        # for ribo, sum only CDS counts
         ribo_factor=counts['ribo'].sum(axis=0)/1.e6
         # combine size factors
         SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
