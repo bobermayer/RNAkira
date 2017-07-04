@@ -548,7 +548,7 @@ def RNAkira (vals, var, NF, T, sig_level=0.01, min_precursor=1, min_ribo=1, maxl
 
         new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][mp] for gene in genes \
                                                          if results[gene][level]['success'] and mp in results[gene][level]['est_pars']]))\
-                                 for mp in model.lower()],columns=['mu','std'],index=list(model.lower()))
+                                 for mp in'abcd'],columns=['mu','std'],index=list('abcd'))
 
         if new_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")

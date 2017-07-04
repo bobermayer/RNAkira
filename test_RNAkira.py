@@ -32,7 +32,7 @@ true_priors=pd.DataFrame(dict(mu=np.array([5,-1.5,.6,0]),\
                          index=list("abcd"))
 
 # distribute models over genes, make sure most genes don't change for multiple testing correction to work
-true_gene_class=['abcd']*5000+\
+true_gene_class=['abcd']*759+\
     ['Abcd']*250+\
     ['aBcd']*250+\
     ['abCd']*250+\
@@ -56,7 +56,7 @@ true_gene_class=['abcd']*5000+\
 time_points=['0','12','24','36','48']
 ntimes=len(time_points)
 # define number of replicates
-nreps=2
+nreps=10
 replicates=map(str,range(nreps))
 samples=list(itertools.product(time_points,replicates))
 # labeling time
@@ -71,7 +71,7 @@ use_true_priors=False
 do_direct_fits=False
 
 # model definition (same as in RNAkira)
-nlevels=4
+nlevels=5
 models=RNAkira.get_model_definitions(nlevels)
 
 min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
@@ -167,7 +167,7 @@ for ng,gene in enumerate(genes):
 
         raise Exception('stop')
 
-print >> sys.stderr, ''
+print >> sys.stderr, '\n'
 
 ########################################################################
 #### normalization, 4sU bias correction                             ####
@@ -187,7 +187,7 @@ if use_length_library_bias:
     SF=pd.concat([elu_factor,flowthrough_factor,unlabeled_factor,\
                   elu_factor,flowthrough_factor,unlabeled_factor,\
                   ribo_factor],axis=0,keys=cols)
-    CF=RNAkira.normalize_elu_flowthrough(counts.divide(LF,axis=0).divide(SF,axis=1).fillna(1),samples,gene_stats,fig_name='test_TPM_correction.pdf')
+    CF=RNAkira.normalize_elu_flowthrough(counts.divide(LF,axis=0).divide(SF,axis=1).fillna(1),samples,gene_stats)#,fig_name='test_TPM_correction.pdf')
     NF=CF.divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 else:
     LF=pd.Series(1,index=gene_stats.index)
@@ -196,8 +196,8 @@ else:
 
 TPM=counts.multiply(NF)
 if use_length_library_bias:
-    stddev=RNAkira.estimate_stddev (TPM,fig_name='test_variability_stddev.pdf')
-    disp=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),fig_name='test_variability_disp.pdf')
+    stddev=RNAkira.estimate_stddev (TPM)#,fig_name='test_variability_stddev.pdf')
+    disp=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1))#,fig_name='test_variability_disp.pdf')
 
 ########################################################################
 #### RNAkira results                                                ####
@@ -249,7 +249,7 @@ for output,statsmodel in zip([output_gaussian,output_nbinom],['gaussian','nbinom
 
     tgc=true_gene_class
     igc=inferred_gene_class
-    mods=[s for lev in [1,2,3,0] for s in set(models[lev]) if len(s)==4]
+    mods=[s for lev in [1,2,3,4,0] for s in set(models[lev]) if len(s)==4]
     matches=np.array([[np.sum((tgc==m1) & (igc==m2)) for m2 in mods] for m1 in mods])
 
     nexact=np.sum(np.diag(matches))
@@ -312,12 +312,12 @@ for output,statsmodel in zip([output_gaussian,output_nbinom],['gaussian','nbinom
     fig.subplots_adjust(hspace=.4,wspace=.4,bottom=.15)
 
     ax=fig.add_subplot(1,2,1)
-    ax.hist(initial_R2.values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
+    ax.hist(initial_R2.dropna().values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
     ax.set_ylabel('counts')
     ax.set_xlabel('initial R2')
 
     ax=fig.add_subplot(1,2,2)
-    ax.hist(modeled_R2.values/initial_R2.values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
+    ax.hist(modeled_R2.dropna().values/initial_R2.dropna().values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
     ax.set_ylabel('counts')
     ax.set_xlabel('modeled eff. R2')
     
