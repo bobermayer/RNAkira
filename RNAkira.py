@@ -670,8 +670,10 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
         nsig=sum(results[gene][0]['LRT-q'] <= alpha for gene in genes)
     elif criterion=='AIC':
         nsig=sum(results[gene][0]['dAIC'] >= alpha for gene in genes)
+    elif criterion=='empirical':
+        nsig=sum(results[gene][0]['LRT-p'] <= alpha for gene in genes)
 
-    if criterion in ['LRT','AIC']:
+    if criterion in ['LRT','AIC','empirical']:
         print >> sys.stderr, '   model: AB(CD), {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
 
     print >> sys.stderr, '[RNAkira] done'
@@ -1117,6 +1119,7 @@ if __name__ == '__main__':
     parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
+    parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
     parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
     parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
 
@@ -1210,11 +1213,23 @@ if __name__ == '__main__':
             print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
             TPM.to_csv(options.out_prefix+'_TPM.csv')
 
+    if options.criterion=='empirical' or options.normalize_over_samples:
+        constant_genes=[line.split()[0] for line in open(options.constant_genes)]
+        print >> sys.stderr, '[main] using {0} constant genes from {1}'.format(len(constant_genes),options.constant_genes)
+    else:
+        constant_genes=None
+
     # correction factors
     print >> sys.stderr, '[main] correcting TPM values using gene stats from '+options.gene_stats
     gene_stats=pd.concat([pd.read_csv(gsfile,index_col=0,header=0) for gsfile in options.gene_stats.split(',')],axis=0).loc[TPM.index]
     UF=correct_ubias(TPM,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'_ubias_correction.pdf'))
-    CF=normalize_elu_flowthrough_over_genes (TPM.multiply(UF), samples,fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
+
+    if options.normalize_over_samples:
+        CF=normalize_elu_flowthrough_over_samples (TPM.multiply(UF), constant_genes,\
+                                                   fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
+    else:
+        CF=normalize_elu_flowthrough_over_genes (TPM.multiply(UF), samples,\
+                                                 fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
 
     # normalization factor combines size factors with TPM correction 
     if options.save_normalization_factors:
@@ -1234,14 +1249,6 @@ if __name__ == '__main__':
 
     # select genes based on TPM cutoffs for mature in any of the time points
     take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) 
-
-    if options.criterion=='empirical':
-        if options.constant_genes is None:
-            raise Exception("cannot use empirical FDR without giving a list of constant genes (--constant_genes)")
-        constant_genes=[line.split()[0] for line in open(options.constant_genes)]
-        print >> sys.stderr, '[main] using {0} constant genes from {1}'.format(len(constant_genes),options.constant_genes)
-    else:
-        constant_genes=None
 
     try:
         T=float(options.T)
