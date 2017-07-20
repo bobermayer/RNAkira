@@ -339,7 +339,7 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
     mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
     SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
 
-    # collect results
+    # collect result
     rates=get_rates(res.x, ntimes, model)
     result=dict(est_pars=pd.DataFrame(rates,columns=list(model.lower()),index=time_points),\
                 logL=-res.fun,\
@@ -348,6 +348,7 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
                 R2_ribo=(1-SSres/SStot)[iribo] if 'd' in model.lower() else np.nan,\
                 AIC=2*(len(res.x)+1+res.fun),\
                 success=res.success,\
+                significant=False,\
                 message=res.message,\
                 npars=len(res.x),
                 model=model)
@@ -356,8 +357,6 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
         # calculate p-value from LRT test using chi2 distribution
         pval=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
         result['LRT-p']=(pval if np.isfinite(pval) else np.nan)
-        # calculate AIC improvement
-        result['dAIC']=np.abs(result['AIC']-parent['AIC'])/np.mean([result['AIC'],parent['AIC']])
 
     return result
 
@@ -471,10 +470,11 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
 
     print >> sys.stderr, '[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
-    if criterion in ['LRT','AIC']:
+    if criterion=='LRT':
         print >> sys.stderr, '[RNAkira] model selection using {0} criterion with alpha={1:.2g}'.format(criterion,alpha)
     elif criterion=='empirical':
         set_new_alpha=False
+        alpha_eff=alpha
         if constant_genes is None:
             raise Exception("[RNAkira] cannot use empirical FDR without constant genes!")
         print >> sys.stderr, '[RNAkira] model selection using empirical FDR with alpha={1:.2g} and {2} constant genes'.format(criterion,alpha,len(constant_genes))
@@ -606,9 +606,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
                     continue
 
                 # only compute this model if the parent model was significant
-                if level > 1 and ((criterion=='LRT' and parent['LRT-q'] > alpha) or \
-                                  (criterion=='AIC' and parent['dAIC'] < alpha) or \
-                                  (criterion=='empirical' and parent['LRT-p'] > alpha)):
+                if level > 1 and not parent['significant']:
                     continue
 
                 # make numpy arrays out of vals, var and NF for computational efficiency
@@ -625,21 +623,23 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
 
             pvals=dict((gene,v['LRT-p']) for gene,v in model_results.iteritems() if 'LRT-p' in v)
             qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
+
+            # determine empirical p-value cutoff if enough constant genes have been fit
+            if criterion=='empirical' and level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
+                alpha_eff=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:int(alpha*len(constant_genes))])
+                print >> sys.stderr, '   setting empirical p-value cutoff to {0:.2g}'.format(alpha_eff)
+                set_new_alpha=True
+
+            # determine which models are significantly better
+            nsig=0
             for gene,q in qvals.iteritems():
                 model_results[gene]['LRT-q']=q
+                if (criterion=='LRT' and model_results[gene]['LRT-q'] <= alpha) or \
+                   (criterion=='empirical' and model_results[gene]['LRT-p'] <= alpha_eff):
+                    model_results[gene]['significant']=True
+                    nsig+=1
 
-            if criterion=='LRT':
-                nsig=sum(r['LRT-q'] <= alpha for r in model_results.values())
-            elif criterion=='AIC':
-                nsig=sum(r['dAIC'] >= alpha for r in model_results.values())
-            elif criterion=='empirical':
-                if level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
-                    alpha=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:int(alpha*len(constant_genes))])
-                    print >> sys.stderr, '   setting empirical p-value cutoff to {0:.2g}'.format(alpha)
-                    set_new_alpha=True
-                nsig=sum(r['LRT-p'] <= alpha for r in model_results.values())
-
-            if criterion in ['LRT','AIC','empirical'] and nfits > 0:
+            if nfits > 0:
                 message +=' ({0} {2} at alpha={1:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient')
 
             print >> sys.stderr, message
@@ -650,37 +650,40 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             if len(level_results[gene]) > 0:
                 results[gene][level]=max(level_results[gene].values(),key=lambda x: x['logL'])
 
+    # now re-evaluate initial model; if this better than best fit, add it to list at higher level
     for gene in genes:
         max_level=max(results[gene].keys())
         if max_level > 0:
-            max_fit=results[gene][max_level]
-            pval=scipy.stats.chi2.sf(2*np.abs(results[gene][0]['logL']-max_fit['logL']),np.abs(results[gene][0]['npars']-max_fit['npars']))
-            results[gene][0]['LRT-p']=(pval if np.isfinite(pval) else 1)
-            results[gene][0]['dAIC']=np.abs(results[gene][0]['AIC']-max_fit['AIC'])/np.mean([results[gene][0]['AIC'],max_fit['AIC']])
+            best_fit=results[gene][max_level]
+            initial=results[gene][0].copy()
+            initial['significant']=False
+            pval=scipy.stats.chi2.sf(2*np.abs(initial['logL']-best_fit['logL']),np.abs(initial['npars']-best_fit['npars']))
+            initial['LRT-p']=(pval if np.isfinite(pval) else 1)
+            results[gene][max_level+1]=initial
         else:
-            results[gene][0]['LRT-p']=0
-            results[gene][0]['dAIC']=0
+            print >> sys.stderr, '?'
 
-    pvals=dict((gene,v[0]['LRT-p']) for gene,v in results.iteritems() if 'LRT-p' in v[0])
+    pvals=dict((gene,v[max(v.keys())]['LRT-p']) for gene,v in results.iteritems() if 'LRT-p' in v[max(v.keys())])
     qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
+    nsig=0
     for gene,q in qvals.iteritems():
-        results[gene][0]['LRT-q']=q
+        best_result=results[gene][max(results[gene].keys())]
+        if 'LRT-q' in best_result:
+            raise Exception("what?")
+        best_result['LRT-q']=q
+        if (criterion=='LRT' and best_result['LRT-q'] <= alpha) or \
+           (criterion=='empirical' and best_result['LRT-p'] <= alpha_eff):
+            best_result['significant']=True
+            nsig+=1
 
-    if criterion=='LRT':
-        nsig=sum(results[gene][0]['LRT-q'] <= alpha for gene in genes)
-    elif criterion=='AIC':
-        nsig=sum(results[gene][0]['dAIC'] >= alpha for gene in genes)
-    elif criterion=='empirical':
-        nsig=sum(results[gene][0]['LRT-p'] <= alpha for gene in genes)
-
-    if criterion in ['LRT','AIC','empirical']:
-        print >> sys.stderr, '   model: AB(CD), {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
+    if len(pvals) > 0:
+        print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
 
     print >> sys.stderr, '[RNAkira] done'
 
     return dict((k,v.values()) for k,v in results.iteritems())
 
-def collect_results (results, time_points, alpha=0.01):
+def collect_results (results, time_points):
 
     """ helper routine to put RNAkira results into a DataFrame """
 
@@ -699,13 +702,13 @@ def collect_results (results, time_points, alpha=0.01):
              ('initial_R2_RNA',initial_fit['R2_RNA']),\
              ('initial_R2_ribo',initial_fit['R2_ribo']),\
              ('initial_fit_success',initial_fit['success']),\
-             ('initial_dAIC',initial_fit['dAIC']),\
+             ('initial_AIC',initial_fit['AIC']),\
              ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
              ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
              ('initial_model',initial_fit['model'])]
 
         # take best significant model or constant otherwise
-        best_fit=filter(lambda x: (x['model'].islower() or x['LRT-q'] < alpha),res)[-1]
+        best_fit=filter(lambda x: (x['model'].islower() or x['significant']),res)[-1]
         pars=best_fit['est_pars']
         tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
             [('modeled_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
@@ -716,7 +719,7 @@ def collect_results (results, time_points, alpha=0.01):
              ('modeled_R2_RNA',best_fit['R2_RNA']),\
              ('modeled_R2_ribo',best_fit['R2_ribo']),\
              ('modeled_fit_success',best_fit['success']),\
-             ('modeled_dAIC',best_fit['dAIC']),\
+             ('modeled_AIC',best_fit['AIC']),\
              ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
              ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
              ('best_model',best_fit['model'])]
@@ -1271,7 +1274,7 @@ if __name__ == '__main__':
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
-    output=collect_results(results, time_points, alpha=options.alpha)
+    output=collect_results(results, time_points)
 
     print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
 

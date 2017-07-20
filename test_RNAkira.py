@@ -201,6 +201,9 @@ stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
 if options.criterion=='empirical':
     counts.ix[constant_genes,'ribo']=0
+    counts.ix[constant_genes,'unlabeled-precursor']=0
+    counts.ix[constant_genes,'elu-precursor']=0
+    counts.ix[constant_genes,'flowthrough-precursor']=0
 
 ########################################################################
 #### normalization, U-bias correction                               ####
@@ -252,7 +255,7 @@ results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, criterion=optio
                         models=None, constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
-output=RNAkira.collect_results(results, time_points, alpha=options.alpha).loc[genes]
+output=RNAkira.collect_results(results, time_points).loc[genes]
 
 output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                        index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
@@ -267,13 +270,6 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 ########################################################################
 
 inferred_gene_class=output['best_model']
-# if best model is worse than initial fit, use initial fit
-if options.criterion=='LRT':
-    insufficient=output['initial_qval'] < options.alpha
-else:
-    insufficient=output['initial_dAIC'] > options.alpha
-
-inferred_gene_class[insufficient]=output.loc[insufficient,'initial_model']
 
 # use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
 if False:
