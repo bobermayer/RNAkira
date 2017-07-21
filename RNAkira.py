@@ -47,7 +47,7 @@ def odr_regression(xvals,yvals,beta0=[1,0],we=None,wd=None):
     myodr=scipy.odr.ODR(data,linear,beta0=beta0)
     return myodr.run().beta
 
-def get_model_definitions(nlevels):
+def get_model_definitions(nlevels,take_all=True):
 
     """ returns a nested hierarchy of models (uppercase denotes variable, lowercase constant rates) """
 
@@ -70,6 +70,8 @@ def get_model_definitions(nlevels):
                     else:
                         parent_models=[pars.translate(maketrans(''.join(x),''.join(x).upper())) for x in itertools.combinations(pars,level-2) if set(x) < set(pc)]
                     level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): parent_models})
+                    if not take_all:
+                        break
         models.update({level: level_models})
 
     return models
@@ -468,19 +470,19 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
     precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
     ribo_cols=['ribo']
 
-    print >> sys.stderr, '[RNAkira] analyzing {0} genes with mature+precursor+ribo'.format((use_precursor & use_ribo).sum())+\
-        '                    {0} genes with mature+ribo'.format((~use_precursor & use_ribo).sum())+\
-        '                    {0} genes with mature+precursor'.format((use_precursor & ~use_ribo).sum())+\
-        '                    {0} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
-    print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
+    print >> sys.stderr, '[RNAkira] {0:5d} genes with mature+precursor+ribo'.format((use_precursor & use_ribo).sum())
+    print >> sys.stderr, '          {0:5d} genes with mature+ribo'.format((~use_precursor & use_ribo).sum())
+    print >> sys.stderr, '          {0:5d} genes with mature+precursor'.format((use_precursor & ~use_ribo).sum())
+    print >> sys.stderr, '          {0:5d} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
+    print >> sys.stderr, '[RNAkira] {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
     if criterion=='LRT':
-        print >> sys.stderr, '[RNAkira] model selection using {0} criterion with alpha={1:.2g}'.format(criterion,alpha)
+        print >> sys.stderr, '[RNAkira] model selection: LRT with alpha={0:.2g}'.format(alpha)
     elif criterion=='empirical':
         set_new_alpha=False
         alpha_eff=alpha
         if constant_genes is None:
             raise Exception("[RNAkira] cannot use empirical FDR without constant genes!")
-        print >> sys.stderr, '[RNAkira] model selection using empirical FDR with alpha={1:.2g} and {2} constant genes'.format(criterion,alpha,len(constant_genes))
+        print >> sys.stderr, '[RNAkira] model selection: empirical FDR with alpha={0:.2g} and {1} constant genes'.format(alpha,len(constant_genes))
     else:
         print >> sys.stderr, '[RNAkira] no model selection'
 
@@ -493,7 +495,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
         nlevels=4
 
     if models is None:
-        models=get_model_definitions(nlevels)
+        models=get_model_definitions(nlevels,take_all=(criterion in ['LRT','empirical']))
 
     results=defaultdict(dict)
     all_results=defaultdict(dict)
@@ -558,6 +560,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], None, model, statsmodel, min_args)
 
             results[gene][level]=result
+            all_results[gene][level]={model: result}
             nfits+=1
 
         if priors is not None:
@@ -603,13 +606,14 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
                 print >> sys.stderr, '   model: {0}, {1} fits\r'.format(model,nfits),
 
                 # use initial estimate from previous level
-                if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models:
-                    parent=results[gene][level-1]
+                if level-1 in all_results[gene] and any(m in all_results[gene][level-1] for m in parent_models):
+                    parent=[all_results[gene][level-1][m] for m in parent_models if m in all_results[gene][level-1]][0]
                 else:
+                    raise Exception('what?')
                     continue
 
-                # only compute this model if the parent model was significant
-                if level > 1 and not parent['significant']:
+                # for model selection: only compute this model if the parent model was significant
+                if level > 1 and criterion in ['LRT','empirical'] and not parent['significant']:
                     continue
 
                 # make numpy arrays out of vals, var and NF for computational efficiency
@@ -643,7 +647,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
                     model_results[gene]['significant']=True
                     nsig+=1
 
-            if nfits > 0:
+            if nfits > 0 and criterion in ['LRT','empirical']:
                 message +=' ({0} {2} at alpha={1:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient')
 
             print >> sys.stderr, message
@@ -654,79 +658,102 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             if len(level_results[gene]) > 0:
                 results[gene][level]=max(level_results[gene].values(),key=lambda x: x['logL'])
 
-    # now re-evaluate initial model; if this better than best fit, add it to list at higher level
-    for gene in genes:
-        max_level=max(results[gene].keys())
-        if max_level > 0:
-            best_fit=results[gene][max_level]
-            initial=results[gene][0].copy()
-            initial['significant']=False
-            pval=scipy.stats.chi2.sf(2*np.abs(initial['logL']-best_fit['logL']),np.abs(initial['npars']-best_fit['npars']))
-            initial['LRT-p']=(pval if np.isfinite(pval) else 1)
-            results[gene][max_level+1]=initial
-        else:
-            print >> sys.stderr, '?'
+    if criterion in ['LRT','empirical']:
 
-    pvals=dict((gene,v[max(v.keys())]['LRT-p']) for gene,v in results.iteritems() if 'LRT-p' in v[max(v.keys())])
-    qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
-    nsig=0
-    for gene,q in qvals.iteritems():
-        best_result=results[gene][max(results[gene].keys())]
-        if 'LRT-q' in best_result:
-            raise Exception("what?")
-        best_result['LRT-q']=q
-        if (criterion=='LRT' and best_result['LRT-q'] <= alpha) or \
-           (criterion=='empirical' and best_result['LRT-p'] <= alpha_eff):
-            best_result['significant']=True
-            nsig+=1
+        # now re-evaluate initial model; if this better than best fit, add it to list at higher level
+        for gene in genes:
+            max_level=max(results[gene].keys())
+            if max_level > 0:
+                best_fit=results[gene][max_level]
+                initial=results[gene][0].copy()
+                initial['significant']=False
+                pval=scipy.stats.chi2.sf(2*np.abs(initial['logL']-best_fit['logL']),np.abs(initial['npars']-best_fit['npars']))
+                initial['LRT-p']=(pval if np.isfinite(pval) else 1)
+                results[gene][max_level+1]=initial
+            else:
+                print >> sys.stderr, '?'
 
-    if len(pvals) > 0:
-        print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
+        pvals=dict((gene,v[max(v.keys())]['LRT-p']) for gene,v in results.iteritems() if 'LRT-p' in v[max(v.keys())])
+        qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
+        nsig=0
+        for gene,q in qvals.iteritems():
+            best_result=results[gene][max(results[gene].keys())]
+            if 'LRT-q' in best_result:
+                raise Exception("what?")
+            best_result['LRT-q']=q
+            if (criterion=='LRT' and best_result['LRT-q'] <= alpha) or \
+               (criterion=='empirical' and best_result['LRT-p'] <= alpha_eff):
+                best_result['significant']=True
+                nsig+=1
+
+        if len(pvals) > 0 and criterion in ['LRT','empirical']:
+            print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
 
     print >> sys.stderr, '[RNAkira] done'
 
     return dict((k,v.values()) for k,v in results.iteritems())
 
-def collect_results (results, time_points):
+def collect_results (results, time_points, select_best=False):
 
     """ helper routine to put RNAkira results into a DataFrame """
 
     output=dict()
     for gene,res in results.iteritems():
 
-        # first get initial fits
-        initial_fit=res[0]
-        pars=initial_fit['est_pars']
-        tmp=[('initial_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
-            [('initial_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
-            [('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
-            [('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
-            [('initial_logL',initial_fit['logL']),\
-             ('initial_R2_tot',initial_fit['R2_tot']),\
-             ('initial_R2_RNA',initial_fit['R2_RNA']),\
-             ('initial_R2_ribo',initial_fit['R2_ribo']),\
-             ('initial_fit_success',initial_fit['success']),\
-             ('initial_AIC',initial_fit['AIC']),\
-             ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
-             ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
-             ('initial_model',initial_fit['model'])]
+        if select_best:
 
-        # take best significant model or constant otherwise
-        best_fit=filter(lambda x: (x['model'].islower() or x['significant']),res)[-1]
-        pars=best_fit['est_pars']
-        tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
-            [('modeled_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
-            [('modeled_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
-            [('modeled_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
-            [('modeled_logL',best_fit['logL']),\
-             ('modeled_R2_tot',best_fit['R2_tot']),\
-             ('modeled_R2_RNA',best_fit['R2_RNA']),\
-             ('modeled_R2_ribo',best_fit['R2_ribo']),\
-             ('modeled_fit_success',best_fit['success']),\
-             ('modeled_AIC',best_fit['AIC']),\
-             ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
-             ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
-             ('best_model',best_fit['model'])]
+            # first get initial fits
+            initial_fit=res[0]
+            pars=initial_fit['est_pars']
+            tmp=[('initial_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
+                [('initial_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
+                [('initial_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
+                [('initial_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
+                [('initial_logL',initial_fit['logL']),\
+                 ('initial_R2_tot',initial_fit['R2_tot']),\
+                 ('initial_R2_RNA',initial_fit['R2_RNA']),\
+                 ('initial_R2_ribo',initial_fit['R2_ribo']),\
+                 ('initial_fit_success',initial_fit['success']),\
+                 ('initial_AIC',initial_fit['AIC']),\
+                 ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
+                 ('initial_qval',initial_fit['LRT-q'] if 'LRT-q' in initial_fit else np.nan),\
+                 ('initial_model',initial_fit['model'])]
+
+            # take best significant model or constant otherwise
+            best_fit=filter(lambda x: (x['model'].islower() or x['significant']),res)[-1]
+            pars=best_fit['est_pars']
+            tmp+=[('modeled_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
+                [('modeled_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
+                [('modeled_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
+                [('modeled_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
+                [('modeled_logL',best_fit['logL']),\
+                 ('modeled_R2_tot',best_fit['R2_tot']),\
+                 ('modeled_R2_RNA',best_fit['R2_RNA']),\
+                 ('modeled_R2_ribo',best_fit['R2_ribo']),\
+                 ('modeled_fit_success',best_fit['success']),\
+                 ('modeled_AIC',best_fit['AIC']),\
+                 ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
+                 ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
+                 ('best_model',best_fit['model'])]
+
+        else:
+
+            tmp=[]
+            for r in res:
+                model=r['model']
+                pars=r['est_pars']
+                tmp+=[(model+'_synthesis_t{0}'.format(t),np.exp(pars.ix[t,'a'])) for t in time_points]+\
+                [(model+'_degradation_t{0}'.format(t),np.exp(pars.ix[t,'b'])) for t in time_points]+\
+                [(model+'_processing_t{0}'.format(t),np.exp(pars.ix[t,'c']) if 'c' in pars.columns else np.nan) for t in time_points]+\
+                [(model+'_translation_t{0}'.format(t),np.exp(pars.ix[t,'d']) if 'd' in pars.columns else np.nan) for t in time_points]+\
+                [(model+'_logL',r['logL']),\
+                 (model+'_R2_tot',r['R2_tot']),\
+                 (model+'_R2_RNA',r['R2_RNA']),\
+                 (model+'_R2_ribo',r['R2_ribo']),\
+                 (model+'_fit_success',r['success']),\
+                 (model+'_AIC',r['AIC']),\
+                 (model+'_pval',r['LRT-p'] if 'LRT-p' in r else np.nan),\
+                 (model+'_qval',r['LRT-q'] if 'LRT-q' in r else np.nan)]
         
         output[gene]=OrderedDict(tmp)
 
@@ -1278,7 +1305,7 @@ if __name__ == '__main__':
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
-    output=collect_results(results, time_points)
+    output=collect_results(results, time_points, select_best=(options.criterion in ['LRT','empirical']))
 
     print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
 

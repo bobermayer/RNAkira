@@ -58,14 +58,7 @@ true_gene_class=['abcd']*4559+\
 
 #true_gene_class=['abcd']*150+['ABCD']*50
 #true_gene_class=['abcd']*1000
-#true_gene_class=['abcd']*500+['Abcd']*125+['ABcd']*125+['ABCd']*125+['ABCD']*125
-
-# define models to test (otherwise RNAkira will test all combinations)
-models=OrderedDict([(0,OrderedDict([('ABCD',[])])),\
-                    (1,OrderedDict([('abcd',['ABCD'])])),\
-                    (2,OrderedDict([('Abcd',['abcd'])])),\
-                    (3,OrderedDict([('ABcd',['Abcd'])])),\
-                    (4,OrderedDict([('ABCd',['ABcd'])]))])
+true_gene_class=['abcd']*500+['Abcd']*125+['ABcd']*125+['ABCd']*125+['ABCD']*125
 
 # define time points
 time_points=['0','20','40','60','80','100']
@@ -252,7 +245,7 @@ else:
 ########################################################################
 
 results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, criterion=options.criterion, min_ribo=.1, min_precursor=.1, \
-                        models=None, constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
+                        constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
 output=RNAkira.collect_results(results, time_points).loc[genes]
@@ -269,60 +262,61 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 #### evaluate performance                                           ####
 ########################################################################
 
-inferred_gene_class=output['best_model']
+if options.criterion in ['LRT','empirical']:
+    inferred_gene_class=output['best_model']
 
-# use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
-if False:
+    # use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
+    if False:
 
-    genes_to_plot=genes[np.where(inferred_gene_class==true_gene_class)[0]]
-    np.random.shuffle(genes_to_plot)
+        genes_to_plot=genes[np.where(inferred_gene_class==true_gene_class)[0]]
+        np.random.shuffle(genes_to_plot)
 
-    for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-        pcorr=pd.Series(dict(log_a0=np.log(SF['unlabeled-mature'].mean()*LF.mean()),log_b0=0,log_c0=0,log_d0=np.log(SF['ribo'].mean()*LF.mean())))
-        RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
-                                     parameters[gene]-pcorr,\
-                                     results[gene],\
-                                     'P' in true_gene_class[gene],\
-                                     'R' in true_gene_class[gene],\
-                                     title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
-                                     priors=None,alpha=options.alpha)
+        for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
+            pcorr=pd.Series(dict(log_a0=np.log(SF['unlabeled-mature'].mean()*LF.mean()),log_b0=0,log_c0=0,log_d0=np.log(SF['ribo'].mean()*LF.mean())))
+            RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
+                                         parameters[gene]-pcorr,\
+                                         results[gene],\
+                                         'P' in true_gene_class[gene],\
+                                         'R' in true_gene_class[gene],\
+                                         title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
+                                         priors=None,alpha=options.alpha)
 
-tgc=true_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
-igc=inferred_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
-mods=sorted(np.union1d(tgc.unique(),igc.unique()),\
-            key=lambda x: (len(x),x))
-matches=np.array([[np.sum((tgc==m1) & (igc==m2)) for m2 in mods] for m1 in mods])
+    tgc=true_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
+    igc=inferred_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
+    mods=sorted(np.union1d(tgc.unique(),igc.unique()),\
+                key=lambda x: (len(x),x))
+    matches=np.array([[np.sum((tgc==m1) & (igc==m2)) for m2 in mods] for m1 in mods])
 
-nexact=np.sum(np.diag(matches))
-nover=np.sum(np.triu(matches,1))
-nlim=sum(tgc!='ABCD')
-nunder=np.sum(np.tril(matches,-1))
-ntarget=sum(tgc!='')
+    nexact=np.sum(np.diag(matches))
+    nover=np.sum(np.triu(matches,1))
+    nlim=sum(tgc!='ABCD')
+    nunder=np.sum(np.tril(matches,-1))
+    ntarget=sum(tgc!='')
 
-stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under-classifications ({5:.1f}%)'.format(nexact,100*nexact/float(nGenes),nover,100*nover/float(nlim),nunder,100*nunder/float(ntarget))
-title='{0} genes, {1} time points, {2} replicates, {3} model\n{4}'.format(nGenes,len(time_points),nreps,options.statsmodel,stats)
-print >> sys.stderr, stats
+    stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under-classifications ({5:.1f}%)'.format(nexact,100*nexact/float(nGenes),nover,100*nover/float(nlim),nunder,100*nunder/float(ntarget))
+    title='{0} genes, {1} time points, {2} replicates, {3} model\n{4}'.format(nGenes,len(time_points),nreps,options.statsmodel,stats)
+    print >> sys.stderr, stats
 
-fig=plt.figure(figsize=(5,5.5))
-fig.clf()
+    fig=plt.figure(figsize=(5,5.5))
+    fig.clf()
 
-ax=fig.add_axes([.15,.1,.8,.8])
-ax.imshow(np.log2(1+matches),origin='lower',cmap=plt.cm.Blues,vmin=0,vmax=np.log2(nGenes))
-ax.set_xticks(range(len(mods)))
-ax.set_xticklabels(mods,rotation=90,va='top',ha='center')
-ax.set_xlabel('inferred model')
-ax.set_ylabel('true model')
-ax.set_yticks(range(len(mods)))
-ax.set_yticklabels(mods)
-for i in range(len(mods)):
-    for j in range(len(mods)):
-        if matches[i,j] > 0:
-            ax.text(j,i,matches[i,j],size=8,ha='center',va='center',color='k' if i==j else 'r')
+    ax=fig.add_axes([.15,.1,.8,.8])
+    ax.imshow(np.log2(1+matches),origin='lower',cmap=plt.cm.Blues,vmin=0,vmax=np.log2(nGenes))
+    ax.set_xticks(range(len(mods)))
+    ax.set_xticklabels(mods,rotation=90,va='top',ha='center')
+    ax.set_xlabel('inferred model')
+    ax.set_ylabel('true model')
+    ax.set_yticks(range(len(mods)))
+    ax.set_yticklabels(mods)
+    for i in range(len(mods)):
+        for j in range(len(mods)):
+            if matches[i,j] > 0:
+                ax.text(j,i,matches[i,j],size=8,ha='center',va='center',color='k' if i==j else 'r')
 
-ax.set_title(title,size=10)
+    ax.set_title(title,size=10)
 
-if options.save_figures:
-    fig.savefig(options.out_prefix+'_confusion_matrix.pdf')
+    if options.save_figures:
+        fig.savefig(options.out_prefix+'_confusion_matrix.pdf')
 
 if False:
 
@@ -349,6 +343,7 @@ if False:
     fig.suptitle('{0} genes, {1} time points, {2} replicates, {3} model'.format(nGenes,len(time_points),nreps,options.statsmodel),size=10)
 
 if False:
+
     initial_R2=output[['initial_R2_RNA','initial_R2_ribo']]
     modeled_R2=output[['modeled_R2_RNA','modeled_R2_ribo']]
 
@@ -366,13 +361,14 @@ if False:
     ax.set_ylabel('counts')
     ax.set_xlabel('modeled eff. R2')
 
-if False:
+if options.criterion not in ['empirical','LRT']:
 
+    output.columns=pd.MultiIndex.from_tuples([(c.split('_')[0],'_'.join(c.split('_')[1:])) for c in output.columns])
     mods=['abcd','Abcd','ABcd','ABCd','ABCD']
 
-    R2_tot=pd.DataFrame.from_dict(dict((gene,pd.Series([results[gene][l]['R2_tot'] for l in [1,2,3,4,0]],index=mods)) for gene in genes),orient='index').loc[genes]
-    R2_RNA=pd.DataFrame.from_dict(dict((gene,pd.Series([results[gene][l]['R2_RNA'] for l in [1,2,3,4,0]],index=mods)) for gene in genes),orient='index').loc[genes]
-    R2_RPF=pd.DataFrame.from_dict(dict((gene,pd.Series([results[gene][l]['R2_ribo'] for l in [1,2,3,4,0]],index=mods)) for gene in genes),orient='index').loc[genes]
+    R2_tot=output.xs("R2_tot",axis=1,level=1)[mods]
+    R2_RNA=output.xs("R2_RNA",axis=1,level=1)[mods]
+    R2_RPF=output.xs("R2_ribo",axis=1,level=1)[mods]
 
     R2=pd.concat([R2_tot,R2_RNA,R2_RPF],axis=1,keys=['tot','RNA','RPF'])
 
