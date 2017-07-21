@@ -18,7 +18,7 @@ np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 parser=OptionParser()
 parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
 parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
-parser.add_option('','--criterion',dest='criterion',help="model selection criterion [LRT]",default='LRT')
+parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
 parser.add_option('','--use_length_library_bias',dest='use_length_library_bias',action='store_true',default=False)
 parser.add_option('','--estimate_variability',dest='estimate_variability',action='store_true',default=False)
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
@@ -93,7 +93,7 @@ gene_stats=pd.DataFrame(dict(exon_length=(10**scipy.stats.norm.rvs(3.0,scale=.56
 gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
-if options.criterion=='empirical':
+if options.model_selection=='empirical':
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:1000]
 else:
     constant_genes=None
@@ -192,7 +192,7 @@ counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
-if options.criterion=='empirical':
+if options.model_selection=='empirical':
     counts.ix[constant_genes,'ribo']=0
     counts.ix[constant_genes,'unlabeled-precursor']=0
     counts.ix[constant_genes,'elu-precursor']=0
@@ -244,7 +244,7 @@ else:
 #### RNAkira results                                                ####
 ########################################################################
 
-results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, criterion=options.criterion, min_ribo=.1, min_precursor=.1, \
+results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
                         constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
@@ -262,7 +262,7 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 #### evaluate performance                                           ####
 ########################################################################
 
-if options.criterion in ['LRT','empirical']:
+if options.model_selection in ['LRT','empirical']:
     inferred_gene_class=output['best_model']
 
     # use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
@@ -361,7 +361,7 @@ if False:
     ax.set_ylabel('counts')
     ax.set_xlabel('modeled eff. R2')
 
-if options.criterion not in ['empirical','LRT']:
+if options.model_selection is None:
 
     output.columns=pd.MultiIndex.from_tuples([(c.split('_')[0],'_'.join(c.split('_')[1:])) for c in output.columns])
     mods=['abcd','Abcd','ABcd','ABCd','ABCD']
@@ -382,6 +382,7 @@ if options.criterion not in ['empirical','LRT']:
         for i,mod in enumerate(mods):
             for k,m in enumerate(mods):
                 ax.bar(i+.15*k,R2[l,m][use & (true_gene_class==mod)].mean(),\
+                       yerr=R2[l,m][use & (true_gene_class==mod)].sem(),\
                        color='rgbcymk'[k],width=.15,lw=0,label=(mods[k] if i==0 else '_nolegend_'))
         ax.set_ylim([0,1])
         ax.set_xticks(np.arange(len(mods))+2.5*.15)
@@ -392,7 +393,8 @@ if options.criterion not in ['empirical','LRT']:
             ax.set_xlabel('true model')
             ax.legend(loc=3,bbox_to_anchor=(-.2,-.8),ncol=5,title='fitted model')
 
-
+    if options.save_figures:
+        fig.savefig(options.out_prefix+'_R2_stats.pdf')
 
 
 

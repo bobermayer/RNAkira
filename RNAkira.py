@@ -449,7 +449,7 @@ def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, 
     fig.suptitle(title)
 
 
-def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
+def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
         estimates empirical priors and fits models of increasing complexity """
@@ -475,9 +475,9 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
     print >> sys.stderr, '          {0:5d} genes with mature+precursor'.format((use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '          {0:5d} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '[RNAkira] {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
-    if criterion=='LRT':
+    if model_selection=='LRT':
         print >> sys.stderr, '[RNAkira] model selection: LRT with alpha={0:.2g}'.format(alpha)
-    elif criterion=='empirical':
+    elif model_selection=='empirical':
         set_new_alpha=False
         alpha_eff=alpha
         if constant_genes is None:
@@ -495,7 +495,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
         nlevels=4
 
     if models is None:
-        models=get_model_definitions(nlevels,take_all=(criterion in ['LRT','empirical']))
+        models=get_model_definitions(nlevels,take_all=(model_selection in ['LRT','empirical']))
 
     results=defaultdict(dict)
     all_results=defaultdict(dict)
@@ -613,7 +613,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
                     continue
 
                 # for model selection: only compute this model if the parent model was significant
-                if level > 1 and criterion in ['LRT','empirical'] and not parent['significant']:
+                if level > 1 and model_selection in ['LRT','empirical'] and not parent['significant']:
                     continue
 
                 # make numpy arrays out of vals, var and NF for computational efficiency
@@ -632,7 +632,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
 
             # determine empirical p-value cutoff if enough constant genes have been fit
-            if criterion=='empirical' and level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
+            if model_selection=='empirical' and level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
                 neff=int(alpha*sum(g in model_results for g in constant_genes))
                 alpha_eff=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:neff])
                 print >> sys.stderr, '   setting empirical p-value cutoff to {0:.2g}'.format(alpha_eff)
@@ -642,23 +642,24 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             nsig=0
             for gene,q in qvals.iteritems():
                 model_results[gene]['LRT-q']=q
-                if (criterion=='LRT' and model_results[gene]['LRT-q'] <= alpha) or \
-                   (criterion=='empirical' and model_results[gene]['LRT-p'] <= alpha_eff):
+                if (model_selection=='LRT' and model_results[gene]['LRT-q'] <= alpha) or \
+                   (model_selection=='empirical' and model_results[gene]['LRT-p'] <= alpha_eff):
                     model_results[gene]['significant']=True
                     nsig+=1
 
-            if nfits > 0 and criterion in ['LRT','empirical']:
+            if nfits > 0 and model_selection in ['LRT','empirical']:
                 message +=' ({0} {2} at alpha={1:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient')
 
             print >> sys.stderr, message
 
-        print >> sys.stderr, '   selecting best models at level {0}'.format(level)
+        if len(models[level]) > 1:
+            print >> sys.stderr, '   selecting best models at level {0}'.format(level)
         for gene in genes:
             all_results[gene][level]=level_results[gene]
             if len(level_results[gene]) > 0:
                 results[gene][level]=max(level_results[gene].values(),key=lambda x: x['logL'])
 
-    if criterion in ['LRT','empirical']:
+    if model_selection in ['LRT','empirical']:
 
         # now re-evaluate initial model; if this better than best fit, add it to list at higher level
         for gene in genes:
@@ -681,12 +682,12 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
             if 'LRT-q' in best_result:
                 raise Exception("what?")
             best_result['LRT-q']=q
-            if (criterion=='LRT' and best_result['LRT-q'] <= alpha) or \
-               (criterion=='empirical' and best_result['LRT-p'] <= alpha_eff):
+            if (model_selection=='LRT' and best_result['LRT-q'] <= alpha) or \
+               (model_selection=='empirical' and best_result['LRT-p'] <= alpha_eff):
                 best_result['significant']=True
                 nsig+=1
 
-        if len(pvals) > 0 and criterion in ['LRT','empirical']:
+        if len(pvals) > 0 and model_selection in ['LRT','empirical']:
             print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
 
     print >> sys.stderr, '[RNAkira] done'
@@ -786,10 +787,8 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
         else:
             print >> sys.stderr, '{0}'.format(r),
 
-        # select reliable genes with decent mean expression level in mature fractions
-        reliable_genes=(TPM['unlabeled-mature',t,r] > TPM['unlabeled-mature',t,r].dropna().quantile(.5)) &\
-            (TPM['elu-mature',t,r] > TPM['elu-mature',t,r].dropna().quantile(.5)) &\
-            (TPM['flowthrough-mature',t,r] > TPM['flowthrough-mature',t,r].dropna().quantile(.5))
+        # select reliable genes with decent expression level in all fractions
+        reliable_genes=(TPM.xs((t,r),axis=1,level=[1,2]) > 1).all(axis=1)
 
         elu_ratio=(TPM['elu-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
         FT_ratio=(TPM['flowthrough-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
@@ -816,7 +815,7 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
             ax.plot(np.arange(bounds[0],bounds[1],.01),intercept+slope*np.arange(bounds[0],bounds[1],.01),'r-')
             ax.set_xlim(bounds[:2])
             ax.set_ylim(bounds[2:])
-            ax.set_title('t={0} ({1})'.format(t,r,ok.sum()),size=10)
+            ax.set_title('t={0} {1} (n={2})'.format(t,r,ok.sum()),size=10)
             if n >= M*(N-1):
                 ax.set_xlabel('elu/unlabeled')
             if n%M==0:
@@ -1144,7 +1143,7 @@ if __name__ == '__main__':
     parser.add_option('-T','--labeling_time',dest='T',help="labeling time (either a number or a csv file)")
     parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
     parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
-    parser.add_option('','--criterion',dest='criterion',help="model selection criterion [LRT]",default="LRT")
+    parser.add_option('','--model_selection',dest='model_selection',help="model selection (using LRT or empirical)")
     parser.add_option('','--constant_genes',dest='constant_genes',help="list of constant genes for empirical FDR calculcation")
     parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
@@ -1247,7 +1246,7 @@ if __name__ == '__main__':
             print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
             TPM.to_csv(options.out_prefix+'_TPM.csv')
 
-    if options.criterion=='empirical' or options.normalize_over_samples:
+    if options.model_selection=='empirical' or options.normalize_over_samples:
         constant_genes=[line.split()[0] for line in open(options.constant_genes)]
         print >> sys.stderr, '[main] using {0} constant genes from {1}'.format(len(constant_genes),options.constant_genes)
     else:
@@ -1294,18 +1293,18 @@ if __name__ == '__main__':
 
     if options.input_TPM is None:
         results=RNAkira(counts[take].fillna(0), variability[take], NF[take], T[take], \
-                        alpha=options.alpha, criterion=options.criterion, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                        alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
                         min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
     else:
         # now TPMs already include correction factors, so use NF=1
         results=RNAkira(TPM[take].fillna(0), variability[take], pd.DataFrame(1.0,index=NF.index,columns=NF.columns)[take], T[take], \
-                        alpha=options.alpha, criterion=options.criterion, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                        alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
                         min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
-    output=collect_results(results, time_points, select_best=(options.criterion in ['LRT','empirical']))
+    output=collect_results(results, time_points, select_best=(options.model_selection in ['LRT','empirical']))
 
     print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
 
