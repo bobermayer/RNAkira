@@ -222,7 +222,7 @@ if options.use_length_library_bias:
                   RF],axis=0,keys=cols)
     TPM=RPK.divide(SF,axis=1).fillna(1)
     UF=RNAkira.correct_ubias(TPM,gene_stats,fig_name=options.out_prefix+'_ubias_correction.pdf' if options.save_figures else None)
-    CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction_1.pdf' if options.save_figures else None)
+    CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
 
 else:
     print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction\n'

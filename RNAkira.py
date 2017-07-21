@@ -468,7 +468,10 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
     precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
     ribo_cols=['ribo']
 
-    print >> sys.stderr, '[RNAkira] analyzing {0} MPR genes, {1} MR genes, {2} MP genes, {3} M genes'.format((use_precursor & use_ribo).sum(),(~use_precursor & use_ribo).sum(),(use_precursor & ~use_ribo).sum(),(~use_precursor & ~use_ribo).sum())
+    print >> sys.stderr, '[RNAkira] analyzing {0} genes with mature+precursor+ribo'.format((use_precursor & use_ribo).sum())+\
+        '                    {0} genes with mature+ribo'.format((~use_precursor & use_ribo).sum())+\
+        '                    {0} genes with mature+precursor'.format((use_precursor & ~use_ribo).sum())+\
+        '                    {0} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '[RNAkira] using {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
     if criterion=='LRT':
         print >> sys.stderr, '[RNAkira] model selection using {0} criterion with alpha={1:.2g}'.format(criterion,alpha)
@@ -626,7 +629,8 @@ def RNAkira (vals, var, NF, T, alpha=0.05, criterion='LRT', min_precursor=1, min
 
             # determine empirical p-value cutoff if enough constant genes have been fit
             if criterion=='empirical' and level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
-                alpha_eff=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:int(alpha*len(constant_genes))])
+                neff=int(alpha*sum(g in model_results for g in constant_genes))
+                alpha_eff=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:neff])
                 print >> sys.stderr, '   setting empirical p-value cutoff to {0:.2g}'.format(alpha_eff)
                 set_new_alpha=True
 
