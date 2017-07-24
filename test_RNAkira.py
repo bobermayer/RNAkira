@@ -39,27 +39,31 @@ true_priors=pd.DataFrame(dict(mu=np.array([6,-1.5,.6,-1]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
-# distribute models over genes
-true_gene_class=['abcd']*4559+\
-    ['Abcd']*50+\
-    ['aBcd']*50+\
-    ['abCd']*50+\
-    ['abcD']*50+\
-    ['ABcd']*33+\
-    ['AbCd']*33+\
-    ['AbcD']*33+\
-    ['aBCd']*33+\
-    ['aBcD']*33+\
-    ['abCD']*33+\
-    ['ABCd']*9+\
-    ['ABcD']*9+\
-    ['AbCD']*9+\
-    ['aBCD']*9+\
-    ['ABCD']*7
+if options.model_selection is not None:
+    # distribute models over genes for model selection run mode
+    true_gene_class=['abcd']*4559+\
+        ['Abcd']*50+\
+        ['aBcd']*50+\
+        ['abCd']*50+\
+        ['abcD']*50+\
+        ['ABcd']*33+\
+        ['AbCd']*33+\
+        ['AbcD']*33+\
+        ['aBCd']*33+\
+        ['aBcD']*33+\
+        ['abCD']*33+\
+        ['ABCd']*9+\
+        ['ABcD']*9+\
+        ['AbCD']*9+\
+        ['aBCD']*9+\
+        ['ABCD']*7
+else:
+    # otherwise use simpler design
+    true_gene_class=['abcd']*4000+['Abcd']*250+['ABcd']*250+['ABCd']*250+['ABCD']*250
 
+# or use other designs for testing
 #true_gene_class=['abcd']*150+['ABCD']*50
 #true_gene_class=['abcd']*1000
-#true_gene_class=['abcd']*500+['Abcd']*125+['ABcd']*125+['ABCd']*125+['ABCD']*125
 
 # define time points
 time_points=['0','20','40','60','80','100']
@@ -95,6 +99,7 @@ gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
 
+# for empirical FDR, use 1000 constant genes
 if options.model_selection=='empirical':
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:1000]
 else:
@@ -165,6 +170,7 @@ for ng,gene in enumerate(genes):
     stddev[gene]=std
     disp[gene]=dsp
 
+    # use this to fit models directly and abort after one gene
     if options.do_direct_fits:
 
         vals_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
@@ -194,6 +200,7 @@ counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
+# constant genes have no intronic or ribo coverage
 if options.model_selection=='empirical':
     counts.ix[constant_genes,'ribo']=0
     counts.ix[constant_genes,'unlabeled-precursor']=0
@@ -256,7 +263,9 @@ output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                        index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
 
 if options.use_length_library_bias:
+    # synthesis rate is measured in different units (TPM/h instead of counts)
     output_true['initial_synthesis']-=np.log(SF['unlabeled-mature'].mean())
+    # translation efficiencies cannot measure global shift
     output_true['initial_translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
 output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 
@@ -321,7 +330,7 @@ if options.model_selection in ['LRT','empirical']:
     if options.save_figures:
         fig.savefig(options.out_prefix+'_confusion_matrix.pdf')
 
-if False:
+if False: # compare fitted values directly to true rate parameters
 
     diff=np.abs(np.log(output.ix[:,:len(time_points)*4])-output_true)
 
@@ -378,22 +387,24 @@ if options.model_selection is None:
     use=R2['tot','ABCD'] > .5
 
     import statsmodels.graphics.boxplots as sgb
+    import matplotlib.patches as mpatches
 
     fig=plt.figure(figsize=(8,6))
     fig.clf()
 
     for j,l in enumerate(['tot','RNA','RPF']):
-        ax=fig.add_axes([.15,.75-.28*j,.8,.22])
+        ax=fig.add_axes([.12,.72-.28*j,.8,.22])
         for i,mod in enumerate(mods):
             for k,m in enumerate(mods):
                 color='rgbcymk'[k]
                 sgb.violinplot([R2[l,m][use & (true_gene_class==mod)]],ax=ax,positions=[i+.15*k],show_boxplot=False,\
-                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.12,cutoff=True),labels=[mods[k] if i==0 else '_nolegend_'])
-                bp=ax.boxplot([R2[l,m][use & (true_gene_class==mod)]],positions=[i+.15*k],widths=.12,sym='',notch=True)
+                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.12,cutoff=True))
+                bp=ax.boxplot([R2[l,m][use & (true_gene_class==mod)]],positions=[i+.15*k],widths=.1,sym='',notch=False)
                 plt.setp(bp['boxes'],color='k',linewidth=1)
                 plt.setp(bp['whiskers'],color='k',linestyle='solid',linewidth=.5)
                 plt.setp(bp['caps'],color='k')
-                plt.setp(bp['medians'],color='k')
+                plt.setp(bp['medians'],color='r')
+        patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(len(mods))]
         ax.set_ylim([0,1])
         ax.set_xticks(np.arange(len(mods))+2.5*.15)
         ax.set_xticklabels([])
@@ -402,7 +413,8 @@ if options.model_selection is None:
         if j==2:
             ax.set_xticklabels(mods)
             ax.set_xlabel('true model')
-            ax.legend(loc=3,bbox_to_anchor=(-.2,-.8),ncol=5,title='fitted model')
+            leg=ax.legend(patches,mods,loc=3,ncol=5,bbox_to_anchor=(-.1,-.75),title='fitted model')
+            leg.get_title().set_position((-150,0))
 
     if options.save_figures:
         fig.savefig(options.out_prefix+'_R2_stats.pdf')
