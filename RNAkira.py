@@ -359,6 +359,8 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
         # calculate p-value from LRT test using chi2 distribution
         pval=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
         result['LRT-p']=(pval if np.isfinite(pval) else np.nan)
+    else:
+        result['LRT-p']=np.nan
 
     return result
 
@@ -605,11 +607,11 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
                 print >> sys.stderr, '   model: {0}, {1} fits\r'.format(model,nfits),
 
-                # use initial estimate from previous level
-                if level-1 in all_results[gene] and any(m in all_results[gene][level-1] for m in parent_models):
-                    parent=[all_results[gene][level-1][m] for m in parent_models if m in all_results[gene][level-1]][0]
+                # get best parent model if available for initial estimate and p-value calculation
+                if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models: #any(m in all_results[gene][level-1] for m in parent_models):
+                    #parent=max(all_results[gene][level-1][m] for m in parent_models if m in all_results[gene][level-1],key=lambda x: x['logL'])
+                    parent=results[gene][level-1]
                 else:
-                    raise Exception('what?')
                     continue
 
                 # for model selection: only compute this model if the parent model was significant
@@ -622,6 +624,11 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
                 nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
 
                 result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
+
+                pnew=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
+                if np.abs(result['LRT-p']-pnew)/pnew > 1.e-3:
+                    raise Exception('p-value wrong?')
+
                 model_results[gene]=result
                 level_results[gene][model]=result
                 nfits+=1
@@ -661,30 +668,31 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
     if model_selection in ['LRT','empirical']:
 
-        # now re-evaluate initial model; if this better than best fit, add it to list at higher level
+        pvals={}
+        # now re-evaluate initial model and add to list at higher level
         for gene in genes:
-            max_level=max(results[gene].keys())
-            if max_level > 0:
-                best_fit=results[gene][max_level]
-                initial=results[gene][0].copy()
-                initial['significant']=False
-                pval=scipy.stats.chi2.sf(2*np.abs(initial['logL']-best_fit['logL']),np.abs(initial['npars']-best_fit['npars']))
-                initial['LRT-p']=(pval if np.isfinite(pval) else 1)
-                results[gene][max_level+1]=initial
-            else:
-                print >> sys.stderr, '?'
+            max_level=max(l for l in results[gene].keys() if results[gene][l]['significant'] or l==1)
+            if max_level==0:
+                continue
+            best_fit=results[gene][max_level]
+            complete=results[gene][0].copy()
+            complete['significant']=False
+            pval=scipy.stats.chi2.sf(2*np.abs(complete['logL']-best_fit['logL']),np.abs(complete['npars']-best_fit['npars']))
+            complete['LRT-p']=(pval if np.isfinite(pval) else np.nan)
+            results[gene][max_level+1]=complete
+            pvals[gene]=pval
 
-        pvals=dict((gene,v[max(v.keys())]['LRT-p']) for gene,v in results.iteritems() if 'LRT-p' in v[max(v.keys())])
+        # determine if this is better than best fit, add it to list at higher level
         qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
         nsig=0
         for gene,q in qvals.iteritems():
-            best_result=results[gene][max(results[gene].keys())]
-            if 'LRT-q' in best_result:
-                raise Exception("what?")
-            best_result['LRT-q']=q
-            if (model_selection=='LRT' and best_result['LRT-q'] <= alpha) or \
-               (model_selection=='empirical' and best_result['LRT-p'] <= alpha_eff):
-                best_result['significant']=True
+            complete=[v for k,v in results[gene].iteritems() if v['model'].isupper()][-1]
+            if 'LRT-q' in complete:
+                raise Exception("this model shouldn't have a q-value yet!")
+            complete['LRT-q']=q
+            if (model_selection=='LRT' and complete['LRT-q'] <= alpha) or \
+               (model_selection=='empirical' and complete['LRT-p'] <= alpha_eff):
+                complete['significant']=True
                 nsig+=1
 
         if len(pvals) > 0 and model_selection in ['LRT','empirical']:
@@ -1304,7 +1312,7 @@ if __name__ == '__main__':
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
-    output=collect_results(results, time_points, select_best=(options.model_selection in ['LRT','empirical']))
+    output=collect_results(results, time_points, select_best=(options.model_selection is not None))
 
     print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
 

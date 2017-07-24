@@ -58,7 +58,7 @@ true_gene_class=['abcd']*4559+\
 
 #true_gene_class=['abcd']*150+['ABCD']*50
 #true_gene_class=['abcd']*1000
-true_gene_class=['abcd']*500+['Abcd']*125+['ABcd']*125+['ABCd']*125+['ABCD']*125
+#true_gene_class=['abcd']*500+['Abcd']*125+['ABcd']*125+['ABCd']*125+['ABCD']*125
 
 # define time points
 time_points=['0','20','40','60','80','100']
@@ -93,6 +93,7 @@ gene_stats=pd.DataFrame(dict(exon_length=(10**scipy.stats.norm.rvs(3.0,scale=.56
 gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
+
 if options.model_selection=='empirical':
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:1000]
 else:
@@ -248,7 +249,7 @@ results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, model_selection
                         constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
-output=RNAkira.collect_results(results, time_points).loc[genes]
+output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes]
 
 output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                        index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
@@ -263,6 +264,7 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 ########################################################################
 
 if options.model_selection in ['LRT','empirical']:
+
     inferred_gene_class=output['best_model']
 
     # use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
@@ -374,19 +376,27 @@ if options.model_selection is None:
 
     use=R2['tot','ABCD'] > .5
 
-    fig=plt.figure(figsize=(5,6))
+    import statsmodels.graphics.boxplots as sgb
+
+    fig=plt.figure(figsize=(8,6))
     fig.clf()
 
     for j,l in enumerate(['tot','RNA','RPF']):
         ax=fig.add_axes([.15,.75-.28*j,.8,.22])
         for i,mod in enumerate(mods):
             for k,m in enumerate(mods):
-                ax.bar(i+.15*k,R2[l,m][use & (true_gene_class==mod)].mean(),\
-                       yerr=R2[l,m][use & (true_gene_class==mod)].sem(),\
-                       color='rgbcymk'[k],width=.15,lw=0,label=(mods[k] if i==0 else '_nolegend_'))
+                color='rgbcymk'[k]
+                sgb.violinplot([R2[l,m][use & (true_gene_class==mod)]],ax=ax,positions=[i+.15*k],show_boxplot=False,\
+                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.12,cutoff=True),labels=[mods[k] if i==0 else '_nolegend_'])
+                bp=ax.boxplot([R2[l,m][use & (true_gene_class==mod)]],positions=[i+.15*k],widths=.12,sym='',notch=True)
+                plt.setp(bp['boxes'],color='k',linewidth=1)
+                plt.setp(bp['whiskers'],color='k',linestyle='solid',linewidth=.5)
+                plt.setp(bp['caps'],color='k')
+                plt.setp(bp['medians'],color='k')
         ax.set_ylim([0,1])
         ax.set_xticks(np.arange(len(mods))+2.5*.15)
         ax.set_xticklabels([])
+        ax.set_xlim([-.2,len(mods)-.2])
         ax.set_ylabel('R2 '+l)
         if j==2:
             ax.set_xticklabels(mods)
