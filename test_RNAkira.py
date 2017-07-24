@@ -6,10 +6,11 @@ import scipy.stats
 from collections import defaultdict,OrderedDict
 import itertools 
 import RNAkira
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from optparse import OptionParser
 
-plt.ion()
 np.random.seed(0)
 
 # ignore warning about division by zero or over-/underflows
