@@ -287,7 +287,7 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 
 if options.model_selection in ['LRT','empirical']:
 
-    igc=output['best_model'].apply(lambda x: '0' if m.islower() else ''.join(m for m in x if m.isupper()))
+    igc=output['best_model'].apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
     mods=sorted(np.union1d(tgc.unique(),igc.unique()),\
                 key=lambda x: (len(x),x))
