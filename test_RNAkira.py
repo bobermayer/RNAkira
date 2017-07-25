@@ -297,7 +297,7 @@ if options.model_selection in ['LRT','empirical']:
     nover=np.sum(np.triu(matches,1))
     nlim=sum(tgc!='ABCD')
     nunder=np.sum(np.tril(matches,-1))
-    ntarget=sum(tgc!='')
+    ntarget=sum(tgc!='0')
 
     stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under-classifications ({5:.1f}%)'.format(nexact,100*nexact/float(nGenes),nover,100*nover/float(nlim),nunder,100*nunder/float(ntarget))
     title='{0} genes, {1} time points, {2} replicates, {3} model\n{4}'.format(nGenes,len(time_points),nreps,options.statsmodel,stats)
