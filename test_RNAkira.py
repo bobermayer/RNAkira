@@ -239,7 +239,8 @@ NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 TPM=counts.multiply(NF)
 
 if options.save_normalization_factors:
-    UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv')
+    UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
+                                                       header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
 if options.estimate_variability:
     if options.statsmodel=='gaussian':

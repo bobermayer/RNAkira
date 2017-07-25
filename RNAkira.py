@@ -1274,12 +1274,13 @@ if __name__ == '__main__':
                                                  fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
 
     # normalization factor combines size factors with TPM correction 
-    if options.save_normalization_factors:
-        print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
-        UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv')
-
     NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
     TPM=TPM.multiply(UF).multiply(CF)
+    if options.save_normalization_factors:
+        print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
+        UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv',\
+                                                 header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
+
 
     print >> sys.stderr, '[main] estimating variability'
     if options.statsmodel=='nbinom':
