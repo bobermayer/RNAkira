@@ -29,6 +29,7 @@ parser.add_option('','--out_prefix',dest='out_prefix',default='test')
 parser.add_option('','--save_figures',dest='save_figures',action='store_true',default=False)
 parser.add_option('','--save_counts',dest='save_counts',action='store_true',default=False)
 parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False)
+parser.add_option('','--save_results',dest='save_results',action='store_true',default=False)
 
 options,args=parser.parse_args()
 
@@ -264,6 +265,9 @@ results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, model_selection
                         priors=true_priors if options.use_true_priors else None)
 
 output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes]
+
+if options.save_results:
+    output.to_csv(options.out_prefix+'_results.csv')
 
 output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                        index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
