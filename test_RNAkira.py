@@ -42,22 +42,22 @@ true_priors=pd.DataFrame(dict(mu=np.array([6,-1.5,.6,-1]),\
                          index=list("abcd"))
 
 # distribute models over genes
-true_gene_class=['abcd']*4559+\
-    ['Abcd']*50+\
-    ['aBcd']*50+\
-    ['abCd']*50+\
-    ['abcD']*50+\
-    ['ABcd']*33+\
-    ['AbCd']*33+\
-    ['AbcD']*33+\
-    ['aBCd']*33+\
-    ['aBcD']*33+\
-    ['abCD']*33+\
-    ['ABCd']*9+\
-    ['ABcD']*9+\
-    ['AbCD']*9+\
-    ['aBCD']*9+\
-    ['ABCD']*7
+true_gene_class=['abcd']*4160+\
+    ['Abcd']*100+\
+    ['aBcd']*100+\
+    ['abCd']*100+\
+    ['abcD']*100+\
+    ['ABcd']*100+\
+    ['AbCd']*50+\
+    ['AbcD']*50+\
+    ['aBCd']*50+\
+    ['aBcD']*50+\
+    ['abCD']*50+\
+    ['ABCd']*20+\
+    ['ABcD']*20+\
+    ['AbCD']*20+\
+    ['aBCD']*20+\
+    ['ABCD']*10
 
 # or use other designs for testing
 #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
