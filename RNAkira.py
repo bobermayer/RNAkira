@@ -61,7 +61,7 @@ def get_model_definitions(nlevels,take_all=True):
                 level_models.update({pars.upper(): []})
             elif level==1:
                 level_models.update({pars: ([pars.upper()])})
-            elif level <= len(pars):
+            elif take_all and level <= len(pars):
                 # get all combination of the variable pars
                 for pc in itertools.combinations(pars,level-1):
                     # find parent model that use a subset of these parameters
@@ -70,8 +70,11 @@ def get_model_definitions(nlevels,take_all=True):
                     else:
                         parent_models=[pars.translate(maketrans(''.join(x),''.join(x).upper())) for x in itertools.combinations(pars,level-2) if set(x) < set(pc)]
                     level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): parent_models})
-                    if not take_all:
-                        break
+            elif level==2 and not take_all:
+                for pc in itertools.combinations(pars,1):
+                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
+                for pc in itertools.combinations(pars,len(pars)-1):
+                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
         models.update({level: level_models})
 
     return models
@@ -486,18 +489,19 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
             raise Exception("[RNAkira] cannot use empirical FDR without constant genes!")
         print >> sys.stderr, '[RNAkira] model selection: empirical FDR with alpha={0:.2g} and {1} constant genes'.format(alpha,len(constant_genes))
     else:
+        model_selection=None
         print >> sys.stderr, '[RNAkira] no model selection'
 
     #min_args=dict(method='L-BFGS-B',jac=False,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
     min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
 
-    if maxlevel is not None:
-        nlevels=maxlevel+1
-    else:
-        nlevels=4
-
     if models is None:
-        models=get_model_definitions(nlevels,take_all=(model_selection in ['LRT','empirical']))
+        if model_selection is not None:
+            nlevels=5 if maxlevel is None else maxlevel+1
+            models=get_model_definitions(nlevels,take_all=True)
+        else:
+            nlevels=3
+            models=get_model_definitions(nlevels,take_all=False)
 
     results=defaultdict(dict)
     all_results=defaultdict(dict)
@@ -608,14 +612,13 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
                 print >> sys.stderr, '   model: {0}, {1} fits\r'.format(model,nfits),
 
                 # get best parent model if available for initial estimate and p-value calculation
-                if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models: #any(m in all_results[gene][level-1] for m in parent_models):
-                    #parent=max(all_results[gene][level-1][m] for m in parent_models if m in all_results[gene][level-1],key=lambda x: x['logL'])
+                if level-1 in results[gene] and results[gene][level-1]['model'] in parent_models: 
                     parent=results[gene][level-1]
                 else:
                     continue
 
                 # for model selection: only compute this model if the parent model was significant
-                if level > 1 and model_selection in ['LRT','empirical'] and not parent['significant']:
+                if level > 1 and model_selection is not None and not parent['significant']:
                     continue
 
                 # make numpy arrays out of vals, var and NF for computational efficiency
@@ -625,15 +628,9 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
                 result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
 
-                pnew=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
-                if np.abs(result['LRT-p']-pnew)/pnew > 1.e-3:
-                    raise Exception('p-value wrong?')
-
                 model_results[gene]=result
                 level_results[gene][model]=result
                 nfits+=1
-
-            message='   model: {0}, {1} fits'.format(model,nfits)
 
             pvals=dict((gene,v['LRT-p']) for gene,v in model_results.iteritems() if 'LRT-p' in v)
             qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
@@ -654,19 +651,20 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
                     model_results[gene]['significant']=True
                     nsig+=1
 
-            if nfits > 0 and model_selection in ['LRT','empirical']:
+            # print status 
+            message='   model: {0}, {1} fits'.format(model,nfits)
+            if model_selection is not None:
                 message +=' ({0} {2} at alpha={1:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient')
+            if nfits > 0:
+                print >> sys.stderr, message
 
-            print >> sys.stderr, message
-
-        if len(models[level]) > 1:
-            print >> sys.stderr, '   selecting best models at level {0}'.format(level)
         for gene in genes:
             all_results[gene][level]=level_results[gene]
+            # select best model at this level
             if len(level_results[gene]) > 0:
-                results[gene][level]=max(level_results[gene].values(),key=lambda x: x['logL'])
+                results[gene][level]=max(all_results[gene][level].values(),key=lambda x: x['logL'])
 
-    if model_selection in ['LRT','empirical']:
+    if model_selection is not None:
 
         pvals={}
         # now re-evaluate initial model and add to list at higher level
@@ -695,12 +693,15 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
                 complete['significant']=True
                 nsig+=1
 
-        if len(pvals) > 0 and model_selection in ['LRT','empirical']:
+        if len(pvals) > 0:
             print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
 
     print >> sys.stderr, '[RNAkira] done'
 
-    return dict((k,v.values()) for k,v in results.iteritems())
+    if model_selection is not None:
+        return dict((gene,rr.values()) for gene,rr in results.iteritems())
+    else:
+        return dict((gene,[r for lv,rr in lr.iteritems() for m,r in rr.iteritems()]) for gene,lr in all_results.iteritems())
 
 def collect_results (results, time_points, select_best=False):
 

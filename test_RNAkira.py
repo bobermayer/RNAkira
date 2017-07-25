@@ -25,8 +25,10 @@ parser.add_option('','--estimate_variability',dest='estimate_variability',action
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
 parser.add_option('','--do_direct_fits',dest='do_direct_fits',action='store_true',default=False)
 parser.add_option('','--statsmodel',dest='statsmodel',default='nbinom')
-parser.add_option('','--save_figures',dest='save_figures',action='store_true',default=False)
 parser.add_option('','--out_prefix',dest='out_prefix',default='test')
+parser.add_option('','--save_figures',dest='save_figures',action='store_true',default=False)
+parser.add_option('','--save_counts',dest='save_counts',action='store_true',default=False)
+parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False)
 
 options,args=parser.parse_args()
 
@@ -39,30 +41,26 @@ true_priors=pd.DataFrame(dict(mu=np.array([6,-1.5,.6,-1]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
-if options.model_selection is not None:
-    # distribute models over genes for model selection run mode
-    true_gene_class=['abcd']*4559+\
-        ['Abcd']*50+\
-        ['aBcd']*50+\
-        ['abCd']*50+\
-        ['abcD']*50+\
-        ['ABcd']*33+\
-        ['AbCd']*33+\
-        ['AbcD']*33+\
-        ['aBCd']*33+\
-        ['aBcD']*33+\
-        ['abCD']*33+\
-        ['ABCd']*9+\
-        ['ABcD']*9+\
-        ['AbCD']*9+\
-        ['aBCD']*9+\
-        ['ABCD']*7
-else:
-    # otherwise use simpler design
-    true_gene_class=['abcd']*4000+['Abcd']*250+['ABcd']*250+['ABCd']*250+['ABCD']*250
+# distribute models over genes
+true_gene_class=['abcd']*4559+\
+    ['Abcd']*50+\
+    ['aBcd']*50+\
+    ['abCd']*50+\
+    ['abcD']*50+\
+    ['ABcd']*33+\
+    ['AbCd']*33+\
+    ['AbcD']*33+\
+    ['aBCd']*33+\
+    ['aBcD']*33+\
+    ['abCD']*33+\
+    ['ABCd']*9+\
+    ['ABcD']*9+\
+    ['AbCD']*9+\
+    ['aBCD']*9+\
+    ['ABCD']*7
 
 # or use other designs for testing
-#true_gene_class=['abcd']*150+['ABCD']*50
+#true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
 #true_gene_class=['abcd']*1000
 
 # define time points
@@ -200,8 +198,12 @@ counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
-# constant genes have no intronic or ribo coverage
+if options.save_counts:
+    # save counts to file
+    counts.to_csv(options.out_prefix+'_counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
+
 if options.model_selection=='empirical':
+    # constant genes have no intronic or ribo coverage
     counts.ix[constant_genes,'ribo']=0
     counts.ix[constant_genes,'unlabeled-precursor']=0
     counts.ix[constant_genes,'elu-precursor']=0
@@ -236,6 +238,9 @@ else:
 NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 TPM=counts.multiply(NF)
 
+if options.save_normalization_factors:
+    UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv')
+
 if options.estimate_variability:
     if options.statsmodel=='gaussian':
         var=RNAkira.estimate_stddev (TPM,fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
@@ -262,6 +267,8 @@ output=RNAkira.collect_results(results, time_points, select_best=(options.model_
 output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                        index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
 
+tgc=true_gene_class.apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
+
 if options.use_length_library_bias:
     # synthesis rate is measured in different units (TPM/h instead of counts)
     output_true['initial_synthesis']-=np.log(SF['unlabeled-mature'].mean())
@@ -275,26 +282,8 @@ output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
 
 if options.model_selection in ['LRT','empirical']:
 
-    inferred_gene_class=output['best_model']
+    igc=output['best_model'].apply(lambda x: '0' if m.islower() else ''.join(m for m in x if m.isupper()))
 
-    # use this if you want to plot specific examples (plot_data_rates_fits needs fixing!)
-    if False:
-
-        genes_to_plot=genes[np.where(inferred_gene_class==true_gene_class)[0]]
-        np.random.shuffle(genes_to_plot)
-
-        for k,gene in enumerate(genes_to_plot[:min(5,len(genes_to_plot))]):
-            pcorr=pd.Series(dict(log_a0=np.log(SF['unlabeled-mature'].mean()*LF.mean()),log_b0=0,log_c0=0,log_d0=np.log(SF['ribo'].mean()*LF.mean())))
-            RNAkira.plot_data_rates_fits(time_points,replicates,TPM.ix[gene],T,\
-                                         parameters[gene]-pcorr,\
-                                         results[gene],\
-                                         'P' in true_gene_class[gene],\
-                                         'R' in true_gene_class[gene],\
-                                         title='{0} (true: {1}, inferred: {2})'.format(gene,true_gene_class[gene],inferred_gene_class[gene]),\
-                                         priors=None,alpha=options.alpha)
-
-    tgc=true_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
-    igc=inferred_gene_class.apply(lambda x: ''.join(m for m in x if m.isupper()))
     mods=sorted(np.union1d(tgc.unique(),igc.unique()),\
                 key=lambda x: (len(x),x))
     matches=np.array([[np.sum((tgc==m1) & (igc==m2)) for m2 in mods] for m1 in mods])
@@ -354,70 +343,87 @@ if False: # compare fitted values directly to true rate parameters
 
     fig.suptitle('{0} genes, {1} time points, {2} replicates, {3} model'.format(nGenes,len(time_points),nreps,options.statsmodel),size=10)
 
-if False:
-
-    initial_R2=output[['initial_R2_RNA','initial_R2_ribo']]
-    modeled_R2=output[['modeled_R2_RNA','modeled_R2_ribo']]
-
-    fig=plt.figure(figsize=(6,3))
-    fig.clf()
-    fig.subplots_adjust(hspace=.4,wspace=.4,bottom=.15)
-
-    ax=fig.add_subplot(1,2,1)
-    ax.hist(initial_R2.dropna().values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
-    ax.set_ylabel('counts')
-    ax.set_xlabel('initial R2')
-
-    ax=fig.add_subplot(1,2,2)
-    ax.hist(modeled_R2.dropna().values/initial_R2.dropna().values,bins=np.arange(-.2,1.2,.01),histtype='step',label=['RNA','RPF'])
-    ax.set_ylabel('counts')
-    ax.set_xlabel('modeled eff. R2')
-
 if options.model_selection is None:
 
     output.columns=pd.MultiIndex.from_tuples([(c.split('_')[0],'_'.join(c.split('_')[1:])) for c in output.columns])
-    mods=['abcd','Abcd','ABcd','ABCd','ABCD']
+    tested_models1=['aBCD','AbCD','ABcD','ABCd']
+    tested_models2=['Abcd','aBcd','abCd','abcD']
+    true_models=tgc.unique()
 
-    R2_tot=output.xs("R2_tot",axis=1,level=1)[mods]
-    R2_RNA=output.xs("R2_RNA",axis=1,level=1)[mods]
-    R2_RPF=output.xs("R2_ribo",axis=1,level=1)[mods]
+    R2=output.xs("R2_tot",axis=1,level=1)[tested_models1+tested_models2+['ABCD']]
+    #R2_RNA=output.xs("R2_RNA",axis=1,level=1)[tested_models]
+    #R2_RPF=output.xs("R2_ribo",axis=1,level=1)[tested_models]
+    #R2=pd.concat([R2_tot,R2_RNA,R2_RPF],axis=1,keys=['tot','RNA','RPF'])
 
-    R2=pd.concat([R2_tot,R2_RNA,R2_RPF],axis=1,keys=['tot','RNA','RPF'])
-
-    use=R2['tot','ABCD'] > .5
+    use=R2['ABCD'] > .5
 
     import statsmodels.graphics.boxplots as sgb
     import matplotlib.patches as mpatches
 
-    fig=plt.figure(figsize=(8,6))
+    fig=plt.figure(figsize=(12,6))
     fig.clf()
 
-    for j,l in enumerate(['tot','RNA','RPF']):
-        ax=fig.add_axes([.12,.72-.28*j,.8,.22])
-        for i,mod in enumerate(mods):
-            for k,m in enumerate(mods):
+    for j,tmod in enumerate([tested_models1,tested_models2]):
+        ax=fig.add_axes([.12,.65-.45*j,.8,.3])
+        for i,mod in enumerate(true_models):
+            for k,m in enumerate(tmod):
                 color='rgbcymk'[k]
-                sgb.violinplot([R2[l,m][use & (true_gene_class==mod)]],ax=ax,positions=[i+.15*k],show_boxplot=False,\
-                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.12,cutoff=True))
-                bp=ax.boxplot([R2[l,m][use & (true_gene_class==mod)]],positions=[i+.15*k],widths=.1,sym='',notch=False)
+                vals=(R2['ABCD']-R2[m])[use & (tgc==mod)].dropna()
+                if len(vals) > 3:
+                    sgb.violinplot([vals],ax=ax,positions=[i+.2*k],show_boxplot=False,\
+                                   plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.15,cutoff=True))
+                bp=ax.boxplot([vals],positions=[i+.2*k],widths=.1,sym='',notch=False)
                 plt.setp(bp['boxes'],color='k',linewidth=1)
                 plt.setp(bp['whiskers'],color='k',linestyle='solid',linewidth=.5)
                 plt.setp(bp['caps'],color='k')
                 plt.setp(bp['medians'],color='r')
-        patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(len(mods))]
+        patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(len(tmod))]
         ax.set_ylim([0,1])
-        ax.set_xticks(np.arange(len(mods))+2.5*.15)
+        #ax.set_yscale('log')
+        ax.set_xticks(np.arange(len(true_models))+2*.2-.1)
         ax.set_xticklabels([])
-        ax.set_xlim([-.2,len(mods)-.2])
-        ax.set_ylabel('R2 '+l)
-        if j==2:
-            ax.set_xticklabels(mods)
-            ax.set_xlabel('true model')
-            leg=ax.legend(patches,mods,loc=3,ncol=5,bbox_to_anchor=(-.1,-.75),title='fitted model')
-            leg.get_title().set_position((-150,0))
+        ax.set_xlim([-.2,len(true_models)-.2])
+        ax.set_ylabel('unexplained variance')
+        ax.set_xticklabels(true_models)
+        ax.set_xlabel('true model')
+        if j==0:
+            ax.set_title('one parameter constant, others vary',size=10)
+        else:
+            ax.set_title('one parameter varies, others constant',size=10)
+            leg=ax.legend(patches,list('ABCD'),loc=3,ncol=4,bbox_to_anchor=(-.1,-.5),title='parameter')
 
     if options.save_figures:
         fig.savefig(options.out_prefix+'_R2_stats.pdf')
+
+if False:
+
+    fig=plt.figure(figsize=(12,3))
+    fig.clf()
+
+    ax=fig.add_axes([.12,.2,.8,.7])
+    for i,mod in enumerate(true_models):
+        for k,(m1,m2) in enumerate(zip(tested_models1[:-1],tested_models2[:-1])):
+            color='rgbcymk'[k]
+            vals=(R2[m2]-R2[m1])[use & (tgc==mod)].dropna()
+            if len(vals.unique()) > 3:
+                sgb.violinplot([vals],ax=ax,positions=[i+.2*k],show_boxplot=False,\
+                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.15,cutoff=True))
+            bp=ax.boxplot([vals],positions=[i+.2*k],widths=.1,sym='',notch=False)
+            plt.setp(bp['boxes'],color='k',linewidth=1)
+            plt.setp(bp['whiskers'],color='k',linestyle='solid',linewidth=.5)
+            plt.setp(bp['caps'],color='k')
+            plt.setp(bp['medians'],color='r')
+    patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(4)]
+    #ax.set_ylim([0,1])
+    #ax.set_yscale('log')
+    ax.set_xticks(np.arange(len(true_models))+2*.2)
+    ax.set_xticklabels([])
+    ax.set_xlim([-.2,len(true_models)-.2])
+    ax.set_ylabel('parameter effect on variance')
+    ax.hlines(0,-.2,len(true_models)-.2,'k',lw=.5,linestyle='dashed')
+    ax.set_xticklabels(true_models)
+    ax.set_xlabel('true model')
+    leg=ax.legend(patches,list('ABCD'),loc=2,ncol=4,title='parameter')
 
 
 
