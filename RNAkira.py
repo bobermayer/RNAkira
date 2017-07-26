@@ -933,8 +933,6 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
         print >> sys.stderr, '[correct_ubias] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
 
-    print >> sys.stderr, ''
-
     return UF
 
 def estimate_dispersion (counts, fig_name=None, weight=1.8):
@@ -1194,10 +1192,11 @@ if __name__ == '__main__':
         constant_genes=None
 
     # correction factors
-    print >> sys.stderr, '[main] correcting TPM values using gene stats from '+options.gene_stats
+    print >> sys.stderr, '\n[main] correcting U bias using gene stats from '+options.gene_stats
     gene_stats=pd.concat([pd.read_csv(gsfile,index_col=0,header=0) for gsfile in options.gene_stats.split(',')],axis=0).loc[TPM.index]
     UF=correct_ubias(TPM,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'_ubias_correction.pdf'))
 
+    print >> sys.stderr, '\n[main] normalizing TPMs'
     if options.normalize_over_samples:
         CF=normalize_elu_flowthrough_over_samples (TPM.multiply(UF), constant_genes,\
                                                    fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
@@ -1214,7 +1213,7 @@ if __name__ == '__main__':
                                                  header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
 
-    print >> sys.stderr, '[main] estimating variability'
+    print >> sys.stderr, '\n[main] estimating variability'
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
         variability=estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1), \
@@ -1233,6 +1232,7 @@ if __name__ == '__main__':
         if T.isnull().sum() > 0:
             raise Exception("{0} genes have no labeling time in {1}".format(T.isnull().sum(),options.T))
 
+    print >> sys.stderr, '\n[main] running RNAkira'
     if options.input_TPM is None:
         results=RNAkira(counts[take].fillna(0), variability[take], NF[take], T[take], \
                         alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\

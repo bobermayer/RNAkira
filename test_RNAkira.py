@@ -218,7 +218,7 @@ if options.save_parameters:
     parameters.to_csv(options.out_prefix+'_parameters.csv',\
                        header=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()],tupleize_cols=True)
 
-print >> sys.stderr, '\n'
+print >> sys.stderr, ''
 
 ########################################################################
 #### normalization, U-bias correction                               ####
@@ -269,10 +269,9 @@ else:
 
 if options.save_variability:
     print >> sys.stderr, '[test_RNAkira] saving variability estimates'
-    var.to_csv(options.out_prefix+'_variability.csv',\
-               header=['.'.join(c) for c in var.columns.tolist()],tupleize_cols=True)
+    var.to_csv(options.out_prefix+'_variability.csv')
 
-print >> sys.stderr, '\n'
+print >> sys.stderr, ''
 
 ########################################################################
 #### RNAkira results                                                ####
