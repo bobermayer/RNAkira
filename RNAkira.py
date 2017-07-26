@@ -255,19 +255,18 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
         if statsmodel=='gaussian':
             # here "var" is stddev
             diff=vals[i]*nf[i]-exp_mean
-            #fun+=np.sum(-.5*(diff/var[i])**2-.5*np.log(2.*np.pi)-np.log(var[i]))
-            fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var[i]))
+            fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var))
             if use_deriv:
-                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff/var[i]**2,axis=0))
+                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff/var**2,axis=0))
 
         elif statsmodel=='nbinom':
             # here "var" is dispersion
             mu=exp_mean/nf[i]
-            nn=1./var[i]
-            pp=1./(1.+var[i]*mu)
+            nn=1./var
+            pp=1./(1.+var*mu)
             fun+=np.sum(scipy.stats.nbinom.logpmf(vals[i],nn,pp))
             if use_deriv:
-                tmp=(vals[i]-nn*var[i]*mu)/(exp_mean*(1.+var[i]*mu))
+                tmp=(vals[i]-nn*var*mu)/(exp_mean*(1.+var*mu))
                 grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(tmp,axis=0))
 
     if fun is np.nan:
@@ -560,7 +559,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
             # make numpy arrays out of vals, var and NF for computational efficiency (therefore we need equal number of replicates for each time point!)
             vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
-            var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,len(cols)))
+            var_here=var.loc[gene][cols].values
             nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
 
             result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], None, model, statsmodel, min_args)
@@ -589,7 +588,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
         else:
             break
 
-    print >> sys.stderr, '\n[RNAkira] fitting model hierarchy'
+    print >> sys.stderr, '\n[RNAkira] fitting models'
 
     # now fit the rates using models of increasing complexity
 
@@ -623,7 +622,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
                 # make numpy arrays out of vals, var and NF for computational efficiency
                 vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
-                var_here=var.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,len(cols)))
+                var_here=var.loc[gene][cols].values
                 nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
 
                 result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
@@ -782,19 +781,12 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
         fig=plt.figure(figsize=(2*N,2*M))
         fig.subplots_adjust(bottom=.1,top=.95,hspace=.4,wspace=.3)
 
-    print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] normalizing by linear regression over genes',
+    print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] normalizing by linear regression over genes'
 
     # collect correction_factors
     CF=pd.Series(1.0,index=TPM.columns)
 
-    told=''
     for n,(t,r) in enumerate(samples):
-
-        if t!=told:
-            print >> sys.stderr, '\n   t={0}: {1}'.format(t,r),
-            told=t
-        else:
-            print >> sys.stderr, '{0}'.format(r),
 
         # select reliable genes with decent expression level in all fractions
         reliable_genes=(TPM.xs((t,r),axis=1,level=[1,2]) > 1).all(axis=1)
@@ -831,10 +823,8 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
                 ax.set_ylabel('FT/unlabeled')
 
     if fig_name is not None:
-        print >> sys.stderr, '\n[normalize_elu_flowthrough_over_genes] saving figure to {0}'.format(fig_name),
+        print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
-
-    print >> sys.stderr, '\n'
 
     return CF
 
@@ -885,8 +875,6 @@ def normalize_elu_flowthrough_over_samples (TPM, constant_genes, fig_name=None):
 
         print >> sys.stderr, '[normalize_elu_flowthrough_over_samples] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
-
-    print >> sys.stderr, ''
 
     return CF
 
@@ -956,7 +944,7 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
     cols=counts.columns.get_level_values(0).unique()
     time_points=counts.columns.get_level_values(1).unique()
     ntimes=len(time_points)
-    disp=pd.DataFrame(1.0,index=counts.index,columns=pd.MultiIndex.from_product([cols,time_points]))
+    disp=pd.DataFrame(1.0,index=counts.index,columns=cols)
     reps=counts.columns.get_level_values(2).unique()
     nreps=len(reps)
 
@@ -964,73 +952,46 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib import pyplot as plt
-        fig=plt.figure(figsize=(3*len(cols),3))
-        fig.subplots_adjust(left=.05,right=.98,hspace=.4,wspace=.3,bottom=.15)
+        fig=plt.figure(figsize=(4,3))
 
-    print >> sys.stderr, '[estimate_dispersion] averaging samples:'
-    for n,c in enumerate(cols):
+    print >> sys.stderr, '[estimate_dispersion] fitting dispersion trend'
 
-        print >> sys.stderr, ' '*3+c
+    mean_counts=counts.mean(axis=1,level=[0,1]).mean(axis=1,level=0)
+    var_counts=counts.var(axis=1,level=[0,1]).mean(axis=1,level=0)
+    # get dispersion trend for genes with positive values
+    ok=(mean_counts.values > 0) \
+        & (mean_counts.values < var_counts.values)
+    y=(var_counts/mean_counts).values[ok]
+    X=np.c_[mean_counts.values[ok],np.ones(ok.sum())]
+    wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
+    slope,intercept=wls.fit().params
+    disp_smooth=(intercept-1)/mean_counts+slope
+    disp_act=((var_counts-mean_counts)/mean_counts**2).replace([np.inf,-np.inf],np.nan)
+    # estimated dispersion is weighted average of actual dispersion and smoothened trend
+    disp=(1.-weight/nreps)*disp_act+weight*disp_smooth/nreps
 
-        mean_counts_within=counts[c].mean(axis=1,level=0)
-        var_counts_within=counts[c].var(axis=1,level=0)
-        # get dispersion trend for genes with positive values
-        ok=(mean_counts_within.values > 0) &\
-            (mean_counts_within.values < var_counts_within.values)
-        y=(var_counts_within/mean_counts_within).values[ok]
-        X=np.c_[mean_counts_within.values[ok],np.ones(ok.sum())]
-        wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
-        slope_within,intercept_within=wls.fit().params
-        disp_smooth=(intercept_within-1)/mean_counts_within+slope_within
-        disp_smooth[disp_smooth < 0]=0
-        disp_act_within=((var_counts_within-mean_counts_within)/mean_counts_within**2).replace([np.inf,-np.inf],np.nan)
-        # estimated dispersion is weighted average of real and smoothened
-        disp_est=(1.-weight/nreps)*disp_act_within+weight*disp_smooth/nreps
+    if fig_name is not None:
 
-        # if estimated dispersion is negative or NaN, use across-sample estimate
-        replace=((disp_est < 0) | disp_est.isnull()).any(axis=1)
-        if replace.sum() > 0:
-
-            mean_counts_all=counts[c].mean(axis=1)
-            var_counts_all=counts[c].var(axis=1)
-            # get dispersion trend for genes with positive values
-            ok=(mean_counts_all > 0) & (mean_counts_all < var_counts_all)
-            y=(var_counts_all/mean_counts_all)[ok]
-            X=np.c_[mean_counts_all[ok],np.ones(ok.sum())]
-            wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
-            slope_all,intercept_all=wls.fit().params
-            disp_smooth=(intercept_all-1)/mean_counts_all+slope_all
-            disp_act_all=(var_counts_all-mean_counts_all)/mean_counts_all**2
-            repl=((1.-weight/nreps)*disp_act_all+weight*disp_smooth/nreps)[replace]
-            disp_est[replace]=pd.concat([repl]*ntimes,axis=1,keys=time_points)
-
-        # NaN values only where mean = 0
-        disp[c]=disp_est.fillna(1)
-
-        if fig_name is not None:
-
-            ax=fig.add_subplot(1,len(cols),n+1)
-            x,y=np.log10(mean_counts_within).values.flatten(),np.log10(disp_act_within).values.flatten()
-            bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
-                                   np.percentile(y[np.isfinite(y)],[1,99])])
-            if not np.all(np.isfinite(bounds)):
-                raise Exception("bounds not finite")
-            ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-            # plot estimated values
-            ax.plot(np.log10(mean_counts_within).values.flatten()[::10],np.log10(disp_est).values.flatten()[::10],'c.',markersize=2)
-            # plot trend
-            ax.plot(np.arange(bounds[0],bounds[1],.1),np.log10((intercept_within-1)/10**np.arange(bounds[0],bounds[1],.1)+slope_within),'r-')
-            ax.set_xlim(bounds[:2])
-            ax.set_ylim(bounds[2:])
-            ax.set_title('{0}'.format(c))
-            ax.set_xlabel('log10 mean')
-            ax.set_ylabel('log10 disp')
+        ax=fig.add_axes([.2,.15,.75,.8])
+        x,y=np.log10(mean_counts).values.flatten(),np.log10(disp_act).values.flatten()
+        bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
+                               np.percentile(y[np.isfinite(y)],[1,99])])
+        if not np.all(np.isfinite(bounds)):
+            raise Exception("bounds not finite")
+        ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+        # plot estimated dispersion for a subset
+        take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
+        ax.plot(x[take],np.log10(disp).values.flatten()[take],'c.',markersize=1)
+        # plot trend
+        ax.plot(np.arange(bounds[0],bounds[1],.1),np.log10((intercept-1)/10**np.arange(bounds[0],bounds[1],.1)+slope),'r-')
+        ax.set_xlim(bounds[:2])
+        ax.set_ylim(bounds[2:])
+        ax.set_xlabel('log10 mean')
+        ax.set_ylabel('log10 disp')
 
     if fig_name is not None:
         print >> sys.stderr, '[estimate_dispersion] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
-
-    print >> sys.stderr, ''
 
     return disp
 
@@ -1041,7 +1002,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
     cols=TPM.columns.get_level_values(0).unique()
     time_points=TPM.columns.get_level_values(1).unique()
     ntimes=len(time_points)
-    stddev=pd.DataFrame(1.0,index=TPM.index,columns=pd.MultiIndex.from_product([cols,time_points]))
+    stddev=pd.DataFrame(1.0,index=TPM.index,columns=cols)
     reps=TPM.columns.get_level_values(2).unique()
     nreps=len(reps)
 
@@ -1049,75 +1010,46 @@ def estimate_stddev (TPM, fig_name=None, weight=1.8):
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib import pyplot as plt
-        fig=plt.figure(figsize=(3*len(cols),3))
-        fig.subplots_adjust(left=.05,right=.98,hspace=.4,wspace=.3,bottom=.15)
+        fig=plt.figure(figsize=(4,3))
 
-    print >> sys.stderr, '[estimate_stddev] averaging samples:'
-    for n,c in enumerate(cols):
+    print >> sys.stderr, '[estimate_stddev] fitting stddev trend'
 
-        print >> sys.stderr, ' '*3+c
+    # do stddev over all samples
+    log10_std=np.log10(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0))
+    # perform lowess regression on log CV vs log mean
+    log10_means=np.log10(TPM.mean(axis=1,level=[0,1]).mean(axis=1,level=0))
+    log10_CV=log10_std-log10_means
+    ok=np.isfinite(log10_means.values) & np.isfinite(log10_CV.values)
+    log10_mean_range=np.abs(log10_means.values[ok].max()-log10_means.values[ok].min())
+    lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV.values[ok],log10_means.values[ok],\
+                                                             frac=0.6,it=1,delta=.01*log10_mean_range).T
+    interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
+    # estimated stddev is weighted average of actual stddev and smoothened trend
+    log10_std_est=((1.-weight/nreps)*log10_std+weight*(interp(log10_means)+log10_means)/nreps)
+    stddev=10**log10_std_est
 
-        # first do within-group stddev
-        log10_std_within=np.log10(TPM[c].std(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
-        # perform lowess regression on log CV vs log mean
-        log10_means_within=np.log10(TPM[c].mean(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
-        log10_CV_within=log10_std_within-log10_means_within
-        ok=np.isfinite(log10_means_within) & np.isfinite(log10_CV_within)
-        log10_mean_range=np.abs(log10_means_within[ok].max().max()-log10_means_within[ok].min().min())
-        lowess_within=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_within[ok].values.flatten(),\
-                                                                        log10_means_within[ok].values.flatten(),\
-                                                                        frac=0.6,it=1,delta=.01*log10_mean_range).T
-        # this interpolates log10 CV from log10 mean
-        interp_within=scipy.interpolate.interp1d(lowess_within[0],lowess_within[1],bounds_error=False)
+    if fig_name is not None:
 
-        # get interpolated std dev within groups
-        log10_std_smooth=interp_within(log10_means_within)+log10_means_within
-        # estimated std dev is weighted average of real and smoothened
-        log10_std_est=(1.-weight/nreps)*log10_std_within+weight*log10_std_smooth/nreps
-        replace=log10_std_est.isnull().any(axis=1)
-
-        if replace.sum() > 0:
-
-            # do stddev over all samples
-            log10_std_all=np.log10(TPM[c].std(axis=1))
-            # perform lowess regression on log CV vs log mean
-            log10_means_all=np.log10(TPM[c].mean(axis=1))
-            log10_CV_all=log10_std_all-log10_means_all
-            ok=np.isfinite(log10_means_all) & np.isfinite(log10_CV_all)
-            log10_mean_range=np.abs(log10_means_all[ok].max()-log10_means_all[ok].min())
-            lowess_all=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV_all[ok].values,log10_means_all[ok].values,\
-                                                                         frac=0.6,it=1,delta=.01*log10_mean_range).T
-            interp_all=scipy.interpolate.interp1d(lowess_all[0],lowess_all[1],bounds_error=False)
-
-            repl=((1.-weight/nreps)*log10_std_all+weight*(interp_all(log10_means_all)+log10_means_all)/nreps)[replace]
-            log10_std_est[replace]=pd.concat([repl]*ntimes,axis=1,keys=time_points)
-
-        # add estimated std dev (NaN values only where mean=0)
-        stddev[c]=10**log10_std_est.fillna(1)
-
-        if fig_name is not None:
-
-            # get regularized CV
-            log10_CV_est=log10_std_est-log10_means_within
-            ax=fig.add_subplot(1,len(cols),n+1)
-            x,y=log10_means_within.values.flatten(),log10_CV_within.values.flatten()
-            bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
-                                   np.percentile(y[np.isfinite(y)],[1,99])])
-            ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-            # plot estimated values
-            ax.plot(log10_means_within.values.flatten()[::10],log10_CV_est.values.flatten()[::10],'c.',markersize=2)
-            ax.plot(np.arange(bounds[0],bounds[1],.1),interp_within(np.arange(bounds[0],bounds[1],.1)),'r-')
-            ax.set_xlim(bounds[:2])
-            ax.set_ylim(bounds[2:])
-            ax.set_title('{0}'.format(c))
-            ax.set_xlabel('log10 mean')
-            ax.set_ylabel('log10 CV')
+        ax=fig.add_axes([.2,.15,.75,.8])
+        # get regularized CV
+        log10_CV_est=log10_std_est-log10_means
+        x,y=log10_means.values[ok],log10_CV.values[ok]
+        bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
+                               np.percentile(y[np.isfinite(y)],[1,99])])
+        ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+        # plot estimated values for a subset
+        take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
+        ax.plot(x[take],log10_CV_est.values[ok][take],'c.',markersize=1)
+        # plot trend
+        ax.plot(np.arange(bounds[0],bounds[1],.1),interp(np.arange(bounds[0],bounds[1],.1)),'r-')
+        ax.set_xlim(bounds[:2])
+        ax.set_ylim(bounds[2:])
+        ax.set_xlabel('log10 mean')
+        ax.set_ylabel('log10 CV')
 
     if fig_name is not None:
         print >> sys.stderr, '[estimate_stddev] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
-
-    print >> sys.stderr, ''
 
     return stddev
 

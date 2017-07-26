@@ -30,6 +30,8 @@ parser.add_option('','--save_figures',dest='save_figures',action='store_true',de
 parser.add_option('','--save_counts',dest='save_counts',action='store_true',default=False)
 parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False)
 parser.add_option('','--save_results',dest='save_results',action='store_true',default=False)
+parser.add_option('','--save_parameters',dest='save_parameters',action='store_true',default=False)
+parser.add_option('','--save_variability',dest='save_variability',action='store_true',default=False)
 
 options,args=parser.parse_args()
 
@@ -106,7 +108,7 @@ else:
 
 parameters={}
 
-print >> sys.stderr, '\n[test_RNAkira] drawing parameters for {0} genes ({1} time points, {2} replicates)'.format(nGenes,ntimes,nreps)
+print >> sys.stderr, '[test_RNAkira] drawing parameters for {0} genes ({1} time points, {2} replicates)'.format(nGenes,ntimes,nreps)
 print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
 
 for ng,gene in enumerate(genes):
@@ -173,8 +175,8 @@ for ng,gene in enumerate(genes):
     if options.do_direct_fits:
 
         vals_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-        std_here=std.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
-        disp_here=dsp.unstack(level=0)[cols].stack().values.reshape((len(time_points),len(cols)))
+        std_here=std.mean(level=0)[cols].values
+        disp_here=dsp.mean(level=0)[cols].values
         nf_here=np.ones_like(vals_here)
 
         resg={}
@@ -193,15 +195,11 @@ for ng,gene in enumerate(genes):
 
         raise Exception('stop')
 
-print >> sys.stderr, '\n'
-
 counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
-
-if options.save_counts:
-    # save counts to file
-    counts.to_csv(options.out_prefix+'_counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
+parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
+                                      index=['synthesis','degradation','processing','translation']).stack() for gene in genes],index=genes)
 
 if options.model_selection=='empirical':
     # constant genes have no intronic or ribo coverage
@@ -209,6 +207,18 @@ if options.model_selection=='empirical':
     counts.ix[constant_genes,'unlabeled-precursor']=0
     counts.ix[constant_genes,'elu-precursor']=0
     counts.ix[constant_genes,'flowthrough-precursor']=0
+
+if options.save_counts:
+    # save counts to file
+    print >> sys.stderr, '[test_RNAkira] saving counts'
+    counts.to_csv(options.out_prefix+'_counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
+
+if options.save_parameters:
+    print >> sys.stderr, '[test_RNAkira] saving parameters'
+    parameters.to_csv(options.out_prefix+'_parameters.csv',\
+                       header=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()],tupleize_cols=True)
+
+print >> sys.stderr, '\n'
 
 ########################################################################
 #### normalization, U-bias correction                               ####
@@ -230,7 +240,7 @@ if options.use_length_library_bias:
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
 
 else:
-    print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction\n'
+    print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction'
     LF=pd.Series(1,index=gene_stats.index)
     SF=pd.Series(1,index=pd.MultiIndex.from_product([cols,time_points,replicates]))
     UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
@@ -240,6 +250,7 @@ NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 TPM=counts.multiply(NF)
 
 if options.save_normalization_factors:
+    print >> sys.stderr, '[test_RNAkira] saving normalization factors'
     UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
                                                        header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
@@ -250,11 +261,18 @@ if options.estimate_variability:
         var=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),\
                                          fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
 else:
-    print >> sys.stderr, '[test_RNAkira] run without estimation of variability\n'
+    print >> sys.stderr, '[test_RNAkira] no estimation of variability'
     if options.statsmodel=='gaussian':
-        var=stddev
+        var=stddev.mean(axis=1,level=0)
     else:
-        var=disp
+        var=disp.mean(axis=1,level=0)
+
+if options.save_variability:
+    print >> sys.stderr, '[test_RNAkira] saving variability estimates'
+    var.to_csv(options.out_prefix+'_variability.csv',\
+               header=['.'.join(c) for c in var.columns.tolist()],tupleize_cols=True)
+
+print >> sys.stderr, '\n'
 
 ########################################################################
 #### RNAkira results                                                ####
@@ -269,17 +287,14 @@ output=RNAkira.collect_results(results, time_points, select_best=(options.model_
 if options.save_results:
     output.to_csv(options.out_prefix+'_results.csv')
 
-output_true=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
-                                       index=['initial_synthesis','initial_degradation','initial_processing','initial_translation']).stack() for gene in genes],index=genes)
-
 tgc=true_gene_class.apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
 if options.use_length_library_bias:
     # synthesis rate is measured in different units (TPM/h instead of counts)
-    output_true['initial_synthesis']-=np.log(SF['unlabeled-mature'].mean())
+    parameters['synthesis']-=np.log(SF['unlabeled-mature'].mean())
     # translation efficiencies cannot measure global shift
-    output_true['initial_translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
-output_true.columns=[c[0]+'_t'+c[1] for c in output_true.columns.tolist()]
+    parameters['translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
+parameters.columns=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()]
 
 ########################################################################
 #### evaluate performance                                           ####
@@ -326,15 +341,13 @@ if options.model_selection in ['LRT','empirical']:
 
 if False: # compare fitted values directly to true rate parameters
 
-    diff=np.abs(np.log(output.ix[:,:len(time_points)*4])-output_true)
-
     fig=plt.figure()
     fig.clf()
     fig.subplots_adjust(hspace=.4,wspace=.4)
 
     for n,r in enumerate(['synthesis','degradation','processing','translation']):
         ax=fig.add_subplot(2,2,n+1)
-        y,x=np.log(output.ix[:,5*n:5*(n+1)]).values.flatten(),output_true.ix[:,5*n:5*(n+1)].values.flatten()
+        y,x=np.log(output.ix[:,5*n:5*(n+1)]).values.flatten(),parameters.ix[:,5*n:5*(n+1)].values.flatten()
         ok=np.isfinite(x) & np.isfinite(y)
         xr=np.percentile(x[ok],[1,99])
         yr=np.percentile(y[ok],[1,99])
@@ -356,9 +369,6 @@ if options.model_selection is None:
     true_models=tgc.unique()
 
     R2=output.xs("R2_tot",axis=1,level=1)[tested_models1+tested_models2+['ABCD']]
-    #R2_RNA=output.xs("R2_RNA",axis=1,level=1)[tested_models]
-    #R2_RPF=output.xs("R2_ribo",axis=1,level=1)[tested_models]
-    #R2=pd.concat([R2_tot,R2_RNA,R2_RPF],axis=1,keys=['tot','RNA','RPF'])
 
     use=R2['ABCD'] > .5
 
@@ -383,8 +393,8 @@ if options.model_selection is None:
                 plt.setp(bp['caps'],color='k')
                 plt.setp(bp['medians'],color='r')
         patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(len(tmod))]
-        ax.set_ylim([0,1])
-        #ax.set_yscale('log')
+        #ax.set_ylim([0,1])
+        ax.set_yscale('log')
         ax.set_xticks(np.arange(len(true_models))+2*.2-.1)
         ax.set_xticklabels([])
         ax.set_xlim([-.2,len(true_models)-.2])
