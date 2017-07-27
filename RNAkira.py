@@ -935,7 +935,7 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
 
     return UF
 
-def estimate_dispersion (counts, fig_name=None, weight=1.8):
+def estimate_dispersion (counts, fig_name=None, weight=1):
 
     """ estimates dispersion by a weighted average of the calculated dispersion and a smoothened trend """
 
@@ -993,7 +993,7 @@ def estimate_dispersion (counts, fig_name=None, weight=1.8):
 
     return disp
 
-def estimate_stddev (TPM, fig_name=None, weight=1.8):
+def estimate_stddev (TPM, fig_name=None, weight=1):
 
     """ estimates stddev by a weighted average of the calculated std dev and a smoothened std dev from the mean-variance plot """
 
@@ -1088,7 +1088,7 @@ if __name__ == '__main__':
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
-    parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1.8]",default=1.8,type=float)
+    parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1]",default=1,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
     parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")

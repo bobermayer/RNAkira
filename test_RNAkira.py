@@ -19,6 +19,8 @@ np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 parser=OptionParser()
 parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
 parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
+parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
+parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
 parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
 parser.add_option('','--use_length_library_bias',dest='use_length_library_bias',action='store_true',default=False)
 parser.add_option('','--estimate_variability',dest='estimate_variability',action='store_true',default=False)
@@ -70,7 +72,7 @@ true_gene_class=['abcd']*4160+\
 time_points=['0','20','40','60','80','100']
 ntimes=len(time_points)
 # define number of replicates
-nreps=5
+nreps=options.nreps
 replicates=map(str,range(nreps))
 samples=list(itertools.product(time_points,replicates))
 # labeling time
@@ -256,9 +258,10 @@ if options.save_normalization_factors:
 
 if options.estimate_variability:
     if options.statsmodel=='gaussian':
-        var=RNAkira.estimate_stddev (TPM,fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
+        var=RNAkira.estimate_stddev (TPM, weight=options.weight,\
+                                     fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
     else:
-        var=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1),\
+        var=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1), weight=options.weight,\
                                          fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
 else:
     print >> sys.stderr, '[test_RNAkira] no estimation of variability'
