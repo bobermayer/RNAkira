@@ -961,12 +961,14 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
         & (mean_counts.values < var_counts.values)
     y=(var_counts/mean_counts).values[ok]
     X=np.c_[mean_counts.values[ok],np.ones(ok.sum())]
-    wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y)
+    wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y**2)
     slope,intercept=wls.fit().params
+    if intercept < 1:
+        raise Exceptions("intercept < 1 in estimate_dispersion")
     disp_smooth=(intercept-1)/mean_counts+slope
     disp_act=((var_counts-mean_counts)/mean_counts**2).replace([np.inf,-np.inf],np.nan)
     # estimated dispersion is weighted average of actual dispersion and smoothened trend
-    disp=(1.-weight/nreps)*disp_act+weight*disp_smooth/nreps
+    disp=(1.-weight/float(nreps))*disp_act+weight*disp_smooth/float(nreps)
 
     if fig_name is not None:
 
@@ -981,7 +983,7 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
         take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
         ax.plot(x[take],np.log10(disp).values.flatten()[take],'c.',markersize=1)
         # plot trend
-        ax.plot(np.arange(bounds[0],bounds[1],.1),np.log10((intercept-1)/10**np.arange(bounds[0],bounds[1],.1)+slope),'r-')
+        ax.plot(np.linspace(bounds[0],bounds[1],100),np.log10((intercept-1)/10**np.linspace(bounds[0],bounds[1],100)+slope),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
         ax.set_xlabel('log10 mean')
@@ -1023,7 +1025,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1):
                                                              frac=0.6,it=1,delta=.01*log10_mean_range).T
     interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
     # estimated stddev is weighted average of actual stddev and smoothened trend
-    log10_std_est=((1.-weight/nreps)*log10_std+weight*(interp(log10_means)+log10_means)/nreps)
+    log10_std_est=((1.-weight/float(nreps))*log10_std+weight*(interp(log10_means)+log10_means)/float(nreps))
     stddev=10**log10_std_est
 
     if fig_name is not None:
@@ -1039,7 +1041,7 @@ def estimate_stddev (TPM, fig_name=None, weight=1):
         take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
         ax.plot(x[take],log10_CV_est.values[ok][take],'c.',markersize=1)
         # plot trend
-        ax.plot(np.arange(bounds[0],bounds[1],.1),interp(np.arange(bounds[0],bounds[1],.1)),'r-')
+        ax.plot(np.linspace(bounds[0],bounds[1],100),interp(np.linspace(bounds[0],bounds[1],100)),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
         ax.set_xlabel('log10 mean')
@@ -1088,7 +1090,7 @@ if __name__ == '__main__':
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
-    parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1]",default=1,type=float)
+    parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1]",default=1.,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
     parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
