@@ -261,8 +261,9 @@ if options.estimate_variability:
         var=RNAkira.estimate_stddev (TPM, weight=options.weight,\
                                      fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
     else:
-        var=RNAkira.estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1), weight=options.weight,\
-                                         fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
+        var=RNAkira.estimate_dispersion (counts.divide(NF.divide(np.exp(np.log(NF).mean(level=0)),level=0),axis=1), weight=options.weight,\
+                                         fig_name=options.out_prefix+'_variability_disp2.pdf' if options.save_figures else None)
+
 else:
     print >> sys.stderr, '[test_RNAkira] no estimation of variability'
     if options.statsmodel=='gaussian':

@@ -956,38 +956,38 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
 
     mean_counts=counts.mean(axis=1,level=[0,1]).mean(axis=1,level=0)
     var_counts=counts.var(axis=1,level=[0,1]).mean(axis=1,level=0)
-    # get dispersion trend for genes with positive values
-    ok=(mean_counts.values > 0) \
-        & (mean_counts.values < var_counts.values)
-    y=(var_counts/mean_counts).values[ok]
-    X=np.c_[mean_counts.values[ok],np.ones(ok.sum())]
-    wls=statsmodels.regression.linear_model.WLS(y,X,weights=1./y**2)
-    slope,intercept=wls.fit().params
-    if intercept < 1:
-        raise Exceptions("intercept < 1 in estimate_dispersion")
-    disp_smooth=(intercept-1)/mean_counts+slope
-    disp_act=((var_counts-mean_counts)/mean_counts**2).replace([np.inf,-np.inf],np.nan)
-    # estimated dispersion is weighted average of actual dispersion and smoothened trend
-    disp=(1.-weight/float(nreps))*disp_act+weight*disp_smooth/float(nreps)
+    # get dispersion trend: theta = alpha/mu + beta, fit in log space
+    log_disp_act=np.log((var_counts-mean_counts)/mean_counts**2)
+    log_mean=np.log(mean_counts)
+    bounds=np.concatenate([np.nanpercentile(log_mean,[1,99]),
+                           np.nanpercentile(log_disp_act,[1,99])])
+    ok=(log_mean.values > bounds[0]) &\
+        (log_mean.values < bounds[1]) &\
+        (log_disp_act.values > bounds[2]) &\
+        (log_disp_act.values < bounds[3])
+    theo_disp = lambda p, x, y: np.log(p[0]/np.exp(x)+p[1])-y
+    (alpha,beta),success=scipy.optimize.leastsq(theo_disp, [1,.02], args=(log_mean.values[ok],log_disp_act.values[ok]))
+    if alpha < 0 or beta < 0 or success==0:
+        raise Exception("invalid parameters in estimate_dispersion")
+    disp_smooth=alpha/mean_counts+beta
+    # estimated dispersion is weighted geometric average of actual dispersion and smoothened trend
+    disp=np.exp((1.-weight/float(nreps))*log_disp_act+weight*np.log(disp_smooth)/float(nreps))
 
     if fig_name is not None:
 
         ax=fig.add_axes([.2,.15,.75,.8])
-        x,y=np.log10(mean_counts).values.flatten(),np.log10(disp_act).values.flatten()
-        bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
-                               np.percentile(y[np.isfinite(y)],[1,99])])
         if not np.all(np.isfinite(bounds)):
             raise Exception("bounds not finite")
-        ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-        # plot estimated dispersion for a subset
-        take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
-        ax.plot(x[take],np.log10(disp).values.flatten()[take],'c.',markersize=1)
+        ax.hexbin(log_mean.values[ok],log_disp_act.values[ok],bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+        # plot estimated dispersion
+        n=max(1000,ok.sum()/10)
+        ax.plot(log_mean.values[ok][:n],np.log(disp).values[ok][:n],'c.',markersize=1)
         # plot trend
-        ax.plot(np.linspace(bounds[0],bounds[1],100),np.log10((intercept-1)/10**np.linspace(bounds[0],bounds[1],100)+slope),'r-')
+        ax.plot(np.linspace(bounds[0],bounds[1],100),np.log(alpha/np.exp(np.linspace(bounds[0],bounds[1],100))+beta),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
-        ax.set_xlabel('log10 mean')
-        ax.set_ylabel('log10 disp')
+        ax.set_xlabel('log mean')
+        ax.set_ylabel('log disp')
 
     if fig_name is not None:
         print >> sys.stderr, '[estimate_dispersion] saving figure to {0}'.format(fig_name)
@@ -1218,10 +1218,11 @@ if __name__ == '__main__':
     print >> sys.stderr, '\n[main] estimating variability'
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
-        variability=estimate_dispersion (counts.divide(SF.divide(np.exp(np.log(SF).mean(level=0)),level=0),axis=1), \
-                                         fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
+        variability=estimate_dispersion (counts.divide(NF.divide(np.exp(np.log(NF).mean(level=0)),level=0),axis=1), weight=options.weight, \
+                                         fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
     else:
-        variability=estimate_stddev (TPM, fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'), weight=options.weight)
+        variability=estimate_stddev (TPM, weight=options.weight, \
+                                     fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
 
     # select genes based on TPM cutoffs for mature in any of the time points
     take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) 
