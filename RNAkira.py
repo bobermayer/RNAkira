@@ -961,6 +961,8 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
     log_mean=np.log(mean_counts)
     bounds=np.concatenate([np.nanpercentile(log_mean,[1,99]),
                            np.nanpercentile(log_disp_act,[1,99])])
+    if not np.all(np.isfinite(bounds)):
+        raise Exception("bounds not finite")
     ok=(log_mean.values > bounds[0]) &\
         (log_mean.values < bounds[1]) &\
         (log_disp_act.values > bounds[2]) &\
@@ -976,8 +978,6 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
     if fig_name is not None:
 
         ax=fig.add_axes([.2,.15,.75,.8])
-        if not np.all(np.isfinite(bounds)):
-            raise Exception("bounds not finite")
         ax.hexbin(log_mean.values[ok],log_disp_act.values[ok],bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
         # plot estimated dispersion
         n=max(1000,ok.sum()/10)
@@ -1160,7 +1160,7 @@ if __name__ == '__main__':
 
         counts=pd.concat([elu_exons,flowthrough_exons,unlabeled_exons,\
                           elu_introns,flowthrough_introns,unlabeled_introns,\
-                          ribo],axis=1,keys=cols).sort_index(axis=1).fillna(0)
+                          ribo],axis=1,keys=cols).sort_index(axis=1)
 
         # combine length factors
         LF=pd.concat([elu_exon_length,flowthrough_exon_length,unlabeled_exon_length,\
@@ -1181,7 +1181,7 @@ if __name__ == '__main__':
                       EF,FF,UF,\
                       RF],axis=0,keys=cols)
         
-        TPM=RPK.divide(SF,axis=1).fillna(0)
+        TPM=RPK.divide(SF,axis=1)
 
         if options.save_TPM:
             print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'

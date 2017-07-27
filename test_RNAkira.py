@@ -205,10 +205,10 @@ parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
 
 if options.model_selection=='empirical':
     # constant genes have no intronic or ribo coverage
-    counts.ix[constant_genes,'ribo']=0
-    counts.ix[constant_genes,'unlabeled-precursor']=0
-    counts.ix[constant_genes,'elu-precursor']=0
-    counts.ix[constant_genes,'flowthrough-precursor']=0
+    counts.ix[constant_genes,'ribo']=np.nan
+    counts.ix[constant_genes,'unlabeled-precursor']=np.nan
+    counts.ix[constant_genes,'elu-precursor']=np.nan
+    counts.ix[constant_genes,'flowthrough-precursor']=np.nan
 
 if options.save_counts:
     # save counts to file
@@ -237,7 +237,7 @@ if options.use_length_library_bias:
     SF=pd.concat([EF,FF,UF,\
                   EF,FF,UF,\
                   RF],axis=0,keys=cols)
-    TPM=RPK.divide(SF,axis=1).fillna(1)
+    TPM=RPK.divide(SF,axis=1)
     UF=RNAkira.correct_ubias(TPM,gene_stats,fig_name=options.out_prefix+'_ubias_correction.pdf' if options.save_figures else None)
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
 
@@ -262,7 +262,7 @@ if options.estimate_variability:
                                      fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
     else:
         var=RNAkira.estimate_dispersion (counts.divide(NF.divide(np.exp(np.log(NF).mean(level=0)),level=0),axis=1), weight=options.weight,\
-                                         fig_name=options.out_prefix+'_variability_disp2.pdf' if options.save_figures else None)
+                                         fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
 
 else:
     print >> sys.stderr, '[test_RNAkira] no estimation of variability'
