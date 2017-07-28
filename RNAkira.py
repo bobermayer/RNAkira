@@ -935,16 +935,9 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
 
     return UF
 
-def estimate_dispersion (counts, fig_name=None, weight=1):
+def estimate_dispersion (counts, weight, fig_name=None):
 
     """ estimates dispersion by a weighted average of the calculated dispersion and a smoothened trend """
-
-    cols=counts.columns.get_level_values(0).unique()
-    time_points=counts.columns.get_level_values(1).unique()
-    ntimes=len(time_points)
-    disp=pd.DataFrame(1.0,index=counts.index,columns=cols)
-    reps=counts.columns.get_level_values(2).unique()
-    nreps=len(reps)
 
     if fig_name is not None:
         import matplotlib
@@ -957,8 +950,8 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
     mean_counts=counts.mean(axis=1,level=[0,1]).mean(axis=1,level=0)
     var_counts=counts.var(axis=1,level=[0,1]).mean(axis=1,level=0)
     # get dispersion trend: theta = alpha/mu + beta, fit in log space
-    log_disp_act=np.log((var_counts-mean_counts)/mean_counts**2)
-    log_mean=np.log(mean_counts)
+    log_disp_act=np.log((var_counts-mean_counts)/mean_counts**2).replace([np.inf,-np.inf],np.nan)
+    log_mean=np.log(mean_counts).replace([np.inf,-np.inf],np.nan)
     bounds=np.concatenate([np.nanpercentile(log_mean,[1,99]),
                            np.nanpercentile(log_disp_act,[1,99])])
     if not np.all(np.isfinite(bounds)):
@@ -971,9 +964,9 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
     (alpha,beta),success=scipy.optimize.leastsq(theo_disp, [1,.02], args=(log_mean.values[ok],log_disp_act.values[ok]))
     if alpha < 0 or beta < 0 or success==0:
         raise Exception("invalid parameters in estimate_dispersion")
-    disp_smooth=alpha/mean_counts+beta
+    log_disp_smooth=np.log(alpha/mean_counts+beta)
     # estimated dispersion is weighted geometric average of actual dispersion and smoothened trend
-    disp=np.exp((1.-weight/float(nreps))*log_disp_act+weight*np.log(disp_smooth)/float(nreps))
+    log_disp=(1.-weight)*log_disp_act+weight*log_disp_smooth
 
     if fig_name is not None:
 
@@ -981,9 +974,10 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
         ax.hexbin(log_mean.values[ok],log_disp_act.values[ok],bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
         # plot estimated dispersion
         n=max(1000,ok.sum()/10)
-        ax.plot(log_mean.values[ok][:n],np.log(disp).values[ok][:n],'c.',markersize=1)
+        ax.plot(log_mean.values[ok][:n],log_disp.values[ok][:n],'c.',markersize=1)
         # plot trend
-        ax.plot(np.linspace(bounds[0],bounds[1],100),np.log(alpha/np.exp(np.linspace(bounds[0],bounds[1],100))+beta),'r-')
+        lmc=np.linspace(bounds[0],bounds[1],100)
+        ax.plot(lmc,np.log(alpha/np.exp(lmc)+beta),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
         ax.set_xlabel('log mean')
@@ -993,18 +987,11 @@ def estimate_dispersion (counts, fig_name=None, weight=1):
         print >> sys.stderr, '[estimate_dispersion] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
 
-    return disp
+    return np.exp(log_disp)
 
-def estimate_stddev (TPM, fig_name=None, weight=1):
+def estimate_stddev (TPM, weight, fig_name=None):
 
-    """ estimates stddev by a weighted average of the calculated std dev and a smoothened std dev from the mean-variance plot """
-
-    cols=TPM.columns.get_level_values(0).unique()
-    time_points=TPM.columns.get_level_values(1).unique()
-    ntimes=len(time_points)
-    stddev=pd.DataFrame(1.0,index=TPM.index,columns=cols)
-    reps=TPM.columns.get_level_values(2).unique()
-    nreps=len(reps)
+    """ estimates stddev by a weighted average of calculated stddev and a smoothened trend """
 
     if fig_name is not None:
         import matplotlib
@@ -1015,43 +1002,43 @@ def estimate_stddev (TPM, fig_name=None, weight=1):
     print >> sys.stderr, '[estimate_stddev] fitting stddev trend'
 
     # do stddev over all samples
-    log10_std=np.log10(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0))
+    log_std=np.log(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0))
     # perform lowess regression on log CV vs log mean
-    log10_means=np.log10(TPM.mean(axis=1,level=[0,1]).mean(axis=1,level=0))
-    log10_CV=log10_std-log10_means
-    ok=np.isfinite(log10_means.values) & np.isfinite(log10_CV.values)
-    log10_mean_range=np.abs(log10_means.values[ok].max()-log10_means.values[ok].min())
-    lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log10_CV.values[ok],log10_means.values[ok],\
-                                                             frac=0.6,it=1,delta=.01*log10_mean_range).T
+    log_means=np.log(TPM.mean(axis=1,level=[0,1]).mean(axis=1,level=0))
+    log_CV=log_std-log_means
+    ok=np.isfinite(log_means.values) & np.isfinite(log_CV.values)
+    log_mean_range=np.abs(log_means.values[ok].max()-log_means.values[ok].min())
+    lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log_CV.values[ok],log_means.values[ok],\
+                                                             frac=0.6,it=1,delta=.01*log_mean_range).T
     interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
     # estimated stddev is weighted average of actual stddev and smoothened trend
-    log10_std_est=((1.-weight/float(nreps))*log10_std+weight*(interp(log10_means)+log10_means)/float(nreps))
-    stddev=10**log10_std_est
+    log_std_est=(1.-weight)*log_std+weight*(interp(log_means)+log_means)
 
     if fig_name is not None:
 
         ax=fig.add_axes([.2,.15,.75,.8])
         # get regularized CV
-        log10_CV_est=log10_std_est-log10_means
-        x,y=log10_means.values[ok],log10_CV.values[ok]
+        log_CV_est=log_std_est-log_means
+        x,y=log_means.values[ok],log_CV.values[ok]
         bounds=np.concatenate([np.percentile(x[np.isfinite(x)],[1,99]),
                                np.percentile(y[np.isfinite(y)],[1,99])])
         ax.hexbin(x,y,bins='log',lw=0,extent=bounds,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
         # plot estimated values for a subset
         take=np.random.choice(np.arange(len(x)),len(x)/10,replace=False)
-        ax.plot(x[take],log10_CV_est.values[ok][take],'c.',markersize=1)
+        ax.plot(x[take],log_CV_est.values[ok][take],'c.',markersize=1)
         # plot trend
-        ax.plot(np.linspace(bounds[0],bounds[1],100),interp(np.linspace(bounds[0],bounds[1],100)),'r-')
+        lmc=np.linspace(bounds[0],bounds[1],100)
+        ax.plot(lmc,interp(lmc),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
-        ax.set_xlabel('log10 mean')
-        ax.set_ylabel('log10 CV')
+        ax.set_xlabel('log mean')
+        ax.set_ylabel('log CV')
 
     if fig_name is not None:
         print >> sys.stderr, '[estimate_stddev] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
 
-    return stddev
+    return np.exp(log_std_est)
 
 def read_featureCounts_output (infiles,samples):
 
@@ -1090,7 +1077,7 @@ if __name__ == '__main__':
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
-    parser.add_option('','--weight',dest='weight',help="weighting parameter for stddev estimation (should be smaller than number of replicates) [1]",default=1.,type=float)
+    parser.add_option('','--weight',dest='weight',help="weighting parameter for dispersion estimation [1]",default=1.,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
     parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
@@ -1218,10 +1205,11 @@ if __name__ == '__main__':
     print >> sys.stderr, '\n[main] estimating variability'
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
-        variability=estimate_dispersion (counts.divide(NF.divide(np.exp(np.log(NF).mean(level=0)),level=0),axis=1), weight=options.weight, \
+        nf_scaled=NF.divide(np.exp(np.log(NF.mean(axis=0)).mean(level=0)),level=0)
+        variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps, \
                                          fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
     else:
-        variability=estimate_stddev (TPM, weight=options.weight, \
+        variability=estimate_stddev (TPM, options.weight/nreps, \
                                      fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
 
     # select genes based on TPM cutoffs for mature in any of the time points

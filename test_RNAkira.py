@@ -243,7 +243,7 @@ if options.use_length_library_bias:
 
 else:
     print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction'
-    LF=pd.Series(1,index=gene_stats.index)
+    LF=pd.Series(1,index=counts.index)
     SF=pd.Series(1,index=pd.MultiIndex.from_product([cols,time_points,replicates]))
     UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
     CF=pd.Series(1,index=counts.columns)
@@ -256,12 +256,13 @@ if options.save_normalization_factors:
     UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
                                                        header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
-if options.estimate_variability:
+if True: #options.estimate_variability:
     if options.statsmodel=='gaussian':
-        var=RNAkira.estimate_stddev (TPM, weight=options.weight,\
+        var=RNAkira.estimate_stddev (TPM, options.weight/nreps,\
                                      fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
     else:
-        var=RNAkira.estimate_dispersion (counts.divide(NF.divide(np.exp(np.log(NF).mean(level=0)),level=0),axis=1), weight=options.weight,\
+        nf_scaled=NF.divide(np.exp(np.log(NF.mean(axis=0)).mean(level=0)),level=0)
+        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps,\
                                          fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
 
 else:
