@@ -1225,13 +1225,13 @@ if __name__ == '__main__':
 
     print >> sys.stderr, '\n[main] running RNAkira'
     if options.input_TPM is None:
-        results=RNAkira(counts[take].fillna(0), variability[take], NF[take], T[take], \
+        results=RNAkira(counts[take], variability[take], NF[take], T[take], \
                         alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
                         min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)
     else:
         # now TPMs already include correction factors, so use NF=1
-        results=RNAkira(TPM[take].fillna(0), variability[take], pd.DataFrame(1.0,index=NF.index,columns=NF.columns)[take], T[take], \
+        results=RNAkira(TPM[take], variability[take], pd.DataFrame(1.0,index=NF.index,columns=NF.columns)[take], T[take], \
                         alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
                         min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel)

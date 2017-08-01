@@ -102,12 +102,6 @@ gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
 
-# for empirical FDR, use 1000 constant genes
-if options.model_selection=='empirical':
-    constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:1000]
-else:
-    constant_genes=None
-
 parameters={}
 
 print >> sys.stderr, '[test_RNAkira] drawing parameters for {0} genes ({1} time points, {2} replicates)'.format(nGenes,ntimes,nreps)
@@ -205,10 +199,13 @@ parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
 
 if options.model_selection=='empirical':
     # constant genes have no intronic or ribo coverage
+    constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:400]
     counts.ix[constant_genes,'ribo']=np.nan
     counts.ix[constant_genes,'unlabeled-precursor']=np.nan
     counts.ix[constant_genes,'elu-precursor']=np.nan
     counts.ix[constant_genes,'flowthrough-precursor']=np.nan
+else:
+    constant_genes=None
 
 if options.save_counts:
     # save counts to file
