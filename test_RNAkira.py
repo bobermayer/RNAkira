@@ -343,27 +343,36 @@ if options.model_selection in ['LRT','empirical']:
     if options.save_figures:
         fig.savefig(options.out_prefix+'_confusion_matrix.pdf')
 
-if False: # compare fitted values directly to true rate parameters
+if True: # compare fitted values directly to true rate parameters
 
     fig=plt.figure()
     fig.clf()
     fig.subplots_adjust(hspace=.4,wspace=.4)
 
     for n,r in enumerate(['synthesis','degradation','processing','translation']):
+        output_cols=['initial_{0}_t{1}'.format(r,t) for t in time_points]
+        par_cols=['{0}_t{1}'.format(r,t) for t in time_points]
         ax=fig.add_subplot(2,2,n+1)
-        y,x=np.log(output.ix[:,5*n:5*(n+1)]).values.flatten(),parameters.ix[:,5*n:5*(n+1)].values.flatten()
+        y,x=np.log(output[output_cols]).values.flatten(),parameters[par_cols].values.flatten()
         ok=np.isfinite(x) & np.isfinite(y)
         xr=np.percentile(x[ok],[1,99])
         yr=np.percentile(y[ok],[1,99])
         ax.hexbin(x[ok],y[ok],extent=(xr[0],xr[1],yr[0],yr[1]),bins='log',mincnt=1,vmin=-1)
         ax.plot(np.linspace(xr[0],xr[1],100),np.linspace(xr[0],xr[1],100),'r-',lw=.5)
-        ax.set_title('{0}: r={1:.2f}'.format(r,scipy.stats.spearmanr(x,y)[0]),size=10)
+        ax.set_title('{0}'.format(r),size=10)
+        good = np.sum(np.abs(np.log2(y/x)[ok]) < 2)
+        ax.set_xlim(xr)
+        ax.set_ylim(yr)
+        ax.text(xr[0]+.05*(xr[1]-xr[0]),yr[1]-.05*(yr[1]-yr[0]),'{0:.0f}% within 2fold\nr={1:.2f}\nrho={2:.2f}\nn={3}'.format(100*good/float(ok.sum()),scipy.stats.pearsonr(x[ok],y[ok])[0],scipy.stats.spearmanr(x[ok],y[ok])[0],ok.sum()),size=6,va='top',ha='left')
         if n > 1:
             ax.set_xlabel('log true value')
         if n%2==0:
             ax.set_ylabel('log fitted value'.format(options.statsmodel))
 
     fig.suptitle('{0} genes, {1} time points, {2} replicates, {3} model'.format(nGenes,len(time_points),nreps,options.statsmodel),size=10)
+
+    if options.save_figures:
+        fig.savefig(options.out_prefix+'_parameter_fits.pdf')
 
 if options.model_selection is None:
 
