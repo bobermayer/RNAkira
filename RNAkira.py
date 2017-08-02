@@ -302,9 +302,6 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
 
     """ fits a specific model to data given variance, normalization factors, labeling time, time points, priors, initial estimate from a parent model etc. """
 
-    # set this to compare analytical gradient against numerical approximation
-    test_gradient=False
-
     ntimes=len(time_points)
     nrates=sum(ntimes if mp.isupper() else 1 for mp in model)
     ncols=3+3*('c' in model.lower())+('d' in model.lower())
@@ -323,8 +320,8 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
     # arguments to minimization
     args=(vals, var, nf, T, time_points, priors['mu'].values, priors['std'].values, model, statsmodel, min_args['jac'])
 
-    # test gradient against numerical difference if necessary
-    if test_gradient:
+    # test gradient against numerical difference for debugging 
+    if False:
 
         pp=initial_estimate
         eps=1.e-6*np.abs(initial_estimate)+1.e-8
@@ -467,15 +464,15 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
     nreps=len(np.unique(vals.columns.get_level_values(2)))
 
     ndim=7
-    TPM=vals*NF
-
-    use_precursor=(TPM['unlabeled-precursor'] > min_precursor).any(axis=1)
-    use_ribo=(TPM['ribo'] > min_ribo).any(axis=1)
+    TPM=vals.multiply(NF)
 
     # these are the features to use depending on cutoffs
     mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
     precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
     ribo_cols=['ribo']
+
+    use_precursor=(TPM['unlabeled-precursor'] > min_precursor).any(axis=1) & ~var[precursor_cols].isnull().any(axis=1)
+    use_ribo=(TPM['ribo'] > min_ribo).any(axis=1) & ~var[ribo_cols].isnull().any(axis=1)
 
     print >> sys.stderr, '[RNAkira] {0:5d} genes with mature+precursor+ribo'.format((use_precursor & use_ribo).sum())
     print >> sys.stderr, '          {0:5d} genes with mature+ribo'.format((~use_precursor & use_ribo).sum())
@@ -967,9 +964,12 @@ def estimate_dispersion (counts, weight, fig_name=None):
     (alpha,beta),success=scipy.optimize.leastsq(theo_disp, [1,.02], args=(log_mean.values[ok],log_disp_act.values[ok]))
     if alpha < 0 or beta < 0 or success==0:
         raise Exception("invalid parameters in estimate_dispersion")
-    log_disp_smooth=np.log(alpha/mean_counts+beta)
+    log_disp_smooth=np.log(alpha/mean_counts+beta).replace([np.inf,-np.inf],np.nan)
     # estimated dispersion is weighted geometric average of actual dispersion and smoothened trend
-    log_disp=(1.-weight)*log_disp_act+weight*log_disp_smooth
+    log_disp=(1.-weight)*log_disp_act + weight*log_disp_smooth
+    # replace NaN values by smooth estimate
+    take=log_disp.isnull()
+    log_disp[take]=log_disp_smooth[take]
 
     if fig_name is not None:
 
@@ -1005,7 +1005,7 @@ def estimate_stddev (TPM, weight, fig_name=None):
     print >> sys.stderr, '[estimate_stddev] fitting stddev trend'
 
     # do stddev over all samples
-    log_std=np.log(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0))
+    log_std=np.log(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
     # perform lowess regression on log CV vs log mean
     log_means=np.log(TPM.mean(axis=1,level=[0,1]).mean(axis=1,level=0))
     log_CV=log_std-log_means
@@ -1014,8 +1014,12 @@ def estimate_stddev (TPM, weight, fig_name=None):
     lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log_CV.values[ok],log_means.values[ok],\
                                                              frac=0.6,it=1,delta=.01*log_mean_range).T
     interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
+    log_std_smooth=(interp(log_means)+log_means).replace([np.inf,-np.inf],np.nan)
     # estimated stddev is weighted average of actual stddev and smoothened trend
-    log_std_est=(1.-weight)*log_std+weight*(interp(log_means)+log_means)
+    log_std_est=(1.-weight)*log_std+weight*log_std_smooth
+    # replace NaN values by smooth estimate
+    take=log_std_est.isnull()
+    log_std_est[take]=log_std_smooth[take]
 
     if fig_name is not None:
 
@@ -1083,6 +1087,7 @@ if __name__ == '__main__':
     parser.add_option('','--weight',dest='weight',help="weighting parameter for dispersion estimation [1]",default=1.,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
+    parser.add_option('','--save_variability',dest='save_variability',action='store_true',default=False,help="""save variability estimates [no]""")
     parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
     parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
     parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
@@ -1146,7 +1151,10 @@ if __name__ == '__main__':
 
         print >> sys.stderr, "[main] merging count values and normalizing"
 
-        cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
+        mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
+        precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+        ribo_cols=['ribo']
+        cols=mature_cols+precursor_cols+ribo_cols
 
         counts=pd.concat([elu_exons,flowthrough_exons,unlabeled_exons,\
                           elu_introns,flowthrough_introns,unlabeled_introns,\
@@ -1215,8 +1223,13 @@ if __name__ == '__main__':
         variability=estimate_stddev (TPM, options.weight/nreps, \
                                      fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
 
+    if options.save_variability:
+        print >> sys.stderr, '[main] saving variability estimates to '+options.out_prefix+'_variability.csv'
+        variability.to_csv(options.out_prefix+'_variability.csv')
+
     # select genes based on TPM cutoffs for mature in any of the time points
-    take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) 
+    take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) & \
+        ~variability[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
 
     try:
         T=float(options.T)

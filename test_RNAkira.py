@@ -253,13 +253,13 @@ if options.save_normalization_factors:
     UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
                                                        header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
-if True: #options.estimate_variability:
+if options.estimate_variability:
     if options.statsmodel=='gaussian':
-        var=RNAkira.estimate_stddev (TPM, options.weight/nreps,\
+        var=RNAkira.estimate_stddev (TPM, options.weight/float(nreps),\
                                      fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
     else:
         nf_scaled=NF.divide(np.exp(np.log(NF.mean(axis=0)).mean(level=0)),level=0)
-        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps,\
+        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps),\
                                          fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
 
 else:
