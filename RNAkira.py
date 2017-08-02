@@ -254,10 +254,10 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
 
         if statsmodel=='gaussian':
             # here "var" is stddev
-            diff=vals[i]*nf[i]-exp_mean
-            fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var))
+            diff=vals[i]-exp_mean/nf[i]
+            fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var/nf[i]))
             if use_deriv:
-                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff/var**2,axis=0))
+                grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff*nf[i]/var**2,axis=0))
 
         elif statsmodel=='nbinom':
             # here "var" is dispersion
@@ -298,9 +298,12 @@ def steady_state_residuals (x, vals, nf, T, time_points, model):
 
     return res
 
-def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel, min_args, test_gradient=False):
+def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel, min_args):
 
     """ fits a specific model to data given variance, normalization factors, labeling time, time points, priors, initial estimate from a parent model etc. """
+
+    # set this to compare analytical gradient against numerical approximation
+    test_gradient=False
 
     ntimes=len(time_points)
     nrates=sum(ntimes if mp.isupper() else 1 for mp in model)
