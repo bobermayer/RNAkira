@@ -42,7 +42,7 @@ options,args=parser.parse_args()
 ########################################################################
 
 # these are prior estimates on rates a,b,c,d similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([6,-1.5,.6,-1]),\
+true_priors=pd.DataFrame(dict(mu=np.array([5,-1.5,.6,-2.5]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
@@ -65,7 +65,7 @@ true_gene_class=['abcd']*4160+\
     ['ABCD']*10
 
 # or use other designs for testing
-true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
+#true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
 #true_gene_class=['abcd']*1000
 
 # define time points
