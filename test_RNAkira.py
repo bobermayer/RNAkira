@@ -65,7 +65,7 @@ true_gene_class=['abcd']*4160+\
     ['ABCD']*10
 
 # or use other designs for testing
-#true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
+true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
 #true_gene_class=['abcd']*1000
 
 # define time points
@@ -301,7 +301,7 @@ parameters.columns=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()]
 #### evaluate performance                                           ####
 ########################################################################
 
-if options.model_selection in ['LRT','empirical']:
+if options.model_selection is not None:
 
     igc=output['best_model'].apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
@@ -347,7 +347,10 @@ if True: # compare fitted values directly to true rate parameters
     fig.subplots_adjust(hspace=.4,wspace=.4)
 
     for n,r in enumerate(['synthesis','degradation','processing','translation']):
-        output_cols=['initial_{0}_t{1}'.format(r,t) for t in time_points]
+        if options.model_selection is None:
+            output_cols=['ABCD_{0}_t{1}'.format(r,t) for t in time_points]
+        else:
+            output_cols=['initial_{0}_t{1}'.format(r,t) for t in time_points]
         par_cols=['{0}_t{1}'.format(r,t) for t in time_points]
         ax=fig.add_subplot(2,2,n+1)
         y,x=np.log(output[output_cols]).values.flatten(),parameters[par_cols].values.flatten()
