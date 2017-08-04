@@ -1150,6 +1150,12 @@ if __name__ == '__main__':
         print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
         flowthrough_exons,flowthrough_exon_length=read_featureCounts_output(options.flowthrough_exons,samples)
 
+        print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
+        unlabeled_introns,unlabeled_intron_length=read_featureCounts_output(options.unlabeled_introns,samples)
+
+        print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
+        unlabeled_exons,unlabeled_exon_length=read_featureCounts_output(options.unlabeled_exons,samples)
+
         if options.ribo is not None:
             print >> sys.stderr, '   ribo:\t\t'+options.ribo
             ribo,ribo_length=read_featureCounts_output(options.ribo,samples)
@@ -1157,12 +1163,6 @@ if __name__ == '__main__':
             print >> sys.stderr, '   ribo:\t\tno values given!'
             ribo=pd.DataFrame(np.nan,index=unlabeled_exons.index,columns=unlabeled_exons.columns)
             ribo_length=pd.Series(1,index=unlabeled_exon_length.index)
-
-        print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
-        unlabeled_introns,unlabeled_intron_length=read_featureCounts_output(options.unlabeled_introns,samples)
-
-        print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
-        unlabeled_exons,unlabeled_exon_length=read_featureCounts_output(options.unlabeled_exons,samples)
 
         print >> sys.stderr, "[main] merging count values and normalizing"
 
