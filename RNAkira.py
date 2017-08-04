@@ -516,16 +516,23 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
                      (TPM['unlabeled-mature'] < TPM['unlabeled-mature'].quantile(.95))).any(axis=1)
         take_precursor=take_mature & use_precursor & ((TPM['unlabeled-precursor'] > TPM['unlabeled-precursor'].quantile(.5)) & \
                                                       (TPM['unlabeled-precursor'] < TPM['unlabeled-precursor'].quantile(.95))).any(axis=1)
-        take_ribo=take_mature & use_ribo & ((TPM['ribo'] > TPM['ribo'].quantile(.5)) & \
-                                            (TPM['ribo'] < TPM['ribo'].quantile(.95))).any(axis=1)
-
         log_a=np.log((TPM['elu-mature']+TPM['elu-precursor']).divide(T,axis=0))[take_precursor].values.flatten()
         log_b=np.log(np.log(1+TPM['elu-mature']/TPM['flowthrough-mature']).divide(T,axis=0))[take_mature].values.flatten()
         log_c=np.log(np.log(1+TPM['elu-precursor']/TPM['flowthrough-precursor']).divide(T,axis=0))[take_precursor].values.flatten()
-        log_d=np.log(TPM['ribo']/TPM['unlabeled-mature'])[take_ribo].values.flatten()
+        all_pars='abc'
+        prior_msg='   est. priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}'
+        est_vals=[log_a,log_b,log_c]
 
-        model_priors=pd.DataFrame([trim_mean_std(x) for x in [log_a,log_b,log_c,log_d]],\
-                                  columns=['mu','std'],index=list('abcd'))
+        if use_ribo.sum() > 0:
+            all_pars+='d'
+            est_vals+=[log_d]
+            prior_msg+=', log_d: {6:.2g}/{7:.2g}'
+            take_ribo=take_mature & use_ribo & ((TPM['ribo'] > TPM['ribo'].quantile(.5)) & \
+                                                (TPM['ribo'] < TPM['ribo'].quantile(.95))).any(axis=1)
+            log_d=np.log(TPM['ribo']/TPM['unlabeled-mature'])[take_ribo].values.flatten()
+
+        model_priors=pd.DataFrame([trim_mean_std(x) for x in est_vals],\
+                                  columns=['mu','std'],index=list(all_pars))
 
         if model_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")
@@ -540,7 +547,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
         niter+=1
 
-        print >> sys.stderr, '   est. priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*model_priors.values.flatten())
+        print >> sys.stderr, prior_msg.format(*model_priors.values.flatten())
 
         nfits=0
         # fit full model for each gene
@@ -574,7 +581,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
         new_priors=pd.DataFrame([trim_mean_std(np.array([results[gene][level]['est_pars'][mp] for gene in genes \
                                                          if results[gene][level]['success'] and mp in results[gene][level]['est_pars']]))\
-                                 for mp in'abcd'],columns=['mu','std'],index=list('abcd'))
+                                 for mp in all_pars],columns=['mu','std'],index=list(all_pars))
 
         if new_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")
@@ -788,8 +795,8 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
 
     for n,(t,r) in enumerate(samples):
 
-        # select reliable genes with decent expression level in all fractions
-        reliable_genes=(TPM.xs((t,r),axis=1,level=[1,2]) > 1).all(axis=1)
+        # select reliable genes with decent expression level in mature fractions
+        reliable_genes=(TPM[['unlabeled-mature','elu-mature']].xs((t,r),axis=1,level=[1,2]) > 1).all(axis=1)
 
         elu_ratio=(TPM['elu-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
         FT_ratio=(TPM['flowthrough-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
@@ -1140,8 +1147,13 @@ if __name__ == '__main__':
         print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
         flowthrough_exons,flowthrough_exon_length=read_featureCounts_output(options.flowthrough_exons,samples)
 
-        print >> sys.stderr, '   ribo:\t\t'+options.ribo
-        ribo,ribo_length=read_featureCounts_output(options.ribo,samples)
+        if options.ribo is not None:
+            print >> sys.stderr, '   ribo:\t\t'+options.ribo
+            ribo,ribo_length=read_featureCounts_output(options.ribo,samples)
+        else:
+            print >> sys.stderr, '   ribo:\t\tno values given!'
+            ribo=pd.DataFrame(np.nan,index=unlabeled_exons.index,columns=unlabeled_exons.columns)
+            ribo_length=pd.Series(1,index=unlabeled_exon_length.index)
 
         print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
         unlabeled_introns,unlabeled_intron_length=read_featureCounts_output(options.unlabeled_introns,samples)
@@ -1153,8 +1165,9 @@ if __name__ == '__main__':
 
         mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
         precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+        cols=mature_cols+precursor_cols
         ribo_cols=['ribo']
-        cols=mature_cols+precursor_cols+ribo_cols
+        cols+=ribo_cols
 
         counts=pd.concat([elu_exons,flowthrough_exons,unlabeled_exons,\
                           elu_introns,flowthrough_introns,unlabeled_introns,\
