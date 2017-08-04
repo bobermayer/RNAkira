@@ -525,11 +525,11 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
         if use_ribo.sum() > 0:
             all_pars+='d'
-            est_vals+=[log_d]
             prior_msg+=', log_d: {6:.2g}/{7:.2g}'
             take_ribo=take_mature & use_ribo & ((TPM['ribo'] > TPM['ribo'].quantile(.5)) & \
                                                 (TPM['ribo'] < TPM['ribo'].quantile(.95))).any(axis=1)
             log_d=np.log(TPM['ribo']/TPM['unlabeled-mature'])[take_ribo].values.flatten()
+            est_vals+=[log_d]
 
         model_priors=pd.DataFrame([trim_mean_std(x) for x in est_vals],\
                                   columns=['mu','std'],index=list(all_pars))
@@ -539,6 +539,9 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
 
     else:
         print >> sys.stderr, 'using given priors'
+        prior_msg='   priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}'
+        if use_ribo.sum() > 0:
+            prior_msg+=', log_d: {6:.2g}/{7:.2g}'
         model_priors=priors
 
     niter=0
