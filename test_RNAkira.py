@@ -60,6 +60,9 @@ if options.no_ribo:
         ['Abc']*75+\
         ['aBC']*75+\
         ['ABC']*25
+
+    #true_gene_class=['abc']*2000
+
 else:
     full_model='ABCD'
     rate_types=['synthesis','degradation','processing','translation']
@@ -82,7 +85,7 @@ else:
 
     # or use other designs for testing
     #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
-    #true_gene_class=['abcd']*1000
+    #true_gene_class=['abcd']*2000
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -194,11 +197,11 @@ for ng,gene in enumerate(genes):
     # use this to fit models directly and abort after one gene
     if options.do_direct_fits:
 
-        vals_here=cnts.unstack(level=0)[cols].stack().values.reshape((len(time_points),nreps,len(cols)))
-        std_here=std.mean(level=0)[cols].values
-        disp_here=dsp.mean(level=0)[cols].values
+        vals_here=cnts.unstack(level=0)[cols_here].stack().values.reshape((len(time_points),nreps,len(cols_here)))
+        std_here=std.mean(level=0)[cols_here].values
+        disp_here=dsp.mean(level=0)[cols_here].values
         if options.use_length_library_bias:
-            nf_here=1./(size_factor[cols].values*gene_stats.ix[gene,'exon_length']/1.e3)
+            nf_here=1./(size_factor[cols_here].values*gene_stats.ix[gene,'exon_length']/1.e3)
             nf_here[0]=nf_here[0]*ubias
             nf_here=np.tile(nf_here,(ntimes,nreps)).reshape(vals_here.shape)
         else:
@@ -206,18 +209,34 @@ for ng,gene in enumerate(genes):
 
         if options.statsmodel=='gaussian':
             res={}
-            res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,true_priors,None,'ABCD','gaussian',min_args)
-            res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,true_priors,res['ABCD'],'abcd','gaussian',min_args)
-            res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,true_priors,res['abcd'],'Abcd','gaussian',min_args)
-            res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,true_priors,res['Abcd'],'ABcd','gaussian',min_args)
-            res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,true_priors,res['ABcd'],'ABCd','gaussian',min_args)
+            if options.no_ribo:
+                priors=true_priors.loc[list('abc')]
+                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,None,'ABC','gaussian',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABC'],'abc','gaussian',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['abc'],'Abc','gaussian',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['Abc'],'ABc','gaussian',min_args)
+            else:
+                priors=true_priors.loc[list('abcd')]
+                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,None,'ABCD','gaussian',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABCD'],'abcd','gaussian',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['abcd'],'Abcd','gaussian',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['Abcd'],'ABcd','gaussian',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABcd'],'ABCd','gaussian',min_args)
         else:
             res={}
-            res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,true_priors,None,'ABCD','nbinom',min_args)
-            res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,true_priors,res['ABCD'],'abcd','nbinom',min_args)
-            res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,true_priors,res['abcd'],'Abcd','nbinom',min_args)
-            res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,true_priors,res['Abcd'],'ABcd','nbinom',min_args)
-            res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,true_priors,res['ABcd'],'ABCd','nbinom',min_args)
+            if options.no_ribo:
+                priors=true_priors.loc[list('abc')]
+                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,None,'ABC','nbinom',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABC'],'abc','nbinom',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['abc'],'Abc','nbinom',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['Abc'],'ABc','nbinom',min_args)
+            else:
+                priors=true_priors.loc[list('abcd')]
+                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,None,'ABCD','nbinom',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABCD'],'abcd','nbinom',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['abcd'],'Abcd','nbinom',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['Abcd'],'ABcd','nbinom',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABcd'],'ABCd','nbinom',min_args)
 
         raise Exception('stop')
 
@@ -254,7 +273,9 @@ print >> sys.stderr, ''
 ########################################################################
 
 if options.use_length_library_bias:
+
     LF=gene_stats['exon_length']/1.e3
+
     # normalize by "sequencing depth"
     RPK=counts.divide(LF,axis=0)
     EF=(RPK['elu-mature'].add(RPK['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
@@ -265,8 +286,12 @@ if options.use_length_library_bias:
                   EF,FF,UF,\
                   RF],axis=0,keys=cols).fillna(1)
     TPM=RPK.divide(SF,axis=1)
+
     UF=RNAkira.correct_ubias(TPM,gene_stats,fig_name=options.out_prefix+'_ubias_correction.pdf' if options.save_figures else None)
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
+
+    #NF=pd.DataFrame(1,index=NF.index,columns=NF.columns).divide(size_factor,axis=1,level=0).divide(gene_stats['exon_length']/1.e3,axis=0)
+    #NF['elu-mature']*=1.-.5*np.exp(-gene_stats.ix[gene,'exon_ucount']/500.)
 
 else:
     print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction'
@@ -276,6 +301,7 @@ else:
     CF=pd.Series(1,index=counts.columns)
 
 NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
+
 TPM=counts.multiply(NF)
 
 if options.save_normalization_factors:
