@@ -898,7 +898,7 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
         from matplotlib import pyplot as plt
         fig=plt.figure(figsize=(4,3))
 
-    print >> sys.stderr, '[correct_ubias] correcting U bias using LOWESS'
+    print >> sys.stderr, '[correct_ubias] correcting U bias using least squares regression'
 
     # select reliable genes with decent mean expression level in mature fractions
     reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
@@ -918,12 +918,10 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
     ucount.index=stacked_index
 
     ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(ucount)
-    ucount_range=np.abs(ucount[ok].max()-ucount[ok].min())
-    lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log2_elu_ratio[ok],ucount[ok],\
-                                                             frac=0.66,it=1,delta=.01*ucount_range).T
-    interp_elu=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
 
-    ucorr=interp_elu(ucount)-np.mean(interp_elu(np.nanpercentile(ucount,np.arange(90,99))))
+    theo_ucorr = lambda p, x, y: p[0]+np.log2(1-p[1]*np.exp(-p[2]*x))-y
+    (alpha,beta,gamma),success=scipy.optimize.leastsq(theo_ucorr, [0,.5,.001], args=(ucount[ok],log2_elu_ratio[ok]))
+    ucorr=np.log2(1.-beta*np.exp(-gamma*ucount))
     
     UF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns)
     UF['elu-mature']=pd.Series(2**(-ucorr),index=stacked_index).unstack(level=1).unstack().fillna(1)
@@ -934,7 +932,7 @@ def correct_ubias (TPM, gene_stats, fig_name=None):
         bounds=np.concatenate([np.nanpercentile(ucount[ok],[1,99]),
                                np.nanpercentile(log2_elu_ratio[ok],[1,99])])
         ax.hexbin(ucount[ok],log2_elu_ratio[ok],bins='log',extent=bounds,lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-        plt.plot(np.linspace(bounds[0],bounds[1],100),interp_elu(np.linspace(bounds[0],bounds[1],100)),'r-')
+        plt.plot(np.linspace(bounds[0],bounds[1],100),alpha+np.log2(1.-beta*np.exp(-gamma*np.linspace(bounds[0],bounds[1],100))),'r-')
         ax.set_xlim(bounds[:2])
         ax.set_ylim(bounds[2:])
         ax.set_ylabel('log2 elu/unlabeled')
@@ -1199,7 +1197,8 @@ if __name__ == '__main__':
 
         if options.save_TPM:
             print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
-            TPM.to_csv(options.out_prefix+'_TPM.csv')
+            TPM.to_csv(options.out_prefix+'_TPM.csv',\
+                       header=['.'.join(c) for c in TPM.columns],tupleize_cols=True)
 
     if options.model_selection=='empirical' or options.normalize_over_samples:
         constant_genes=[line.split()[0] for line in open(options.constant_genes)]
@@ -1232,7 +1231,7 @@ if __name__ == '__main__':
     print >> sys.stderr, '\n[main] estimating variability'
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
-        nf_scaled=NF.divide(np.exp(np.log(NF.mean(axis=0)).mean(level=0)),level=0)
+        nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
         variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps, \
                                          fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
     else:
