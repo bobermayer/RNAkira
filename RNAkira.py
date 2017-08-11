@@ -888,56 +888,58 @@ def normalize_elu_flowthrough_over_samples (TPM, constant_genes, fig_name=None):
 
     return CF
 
-def correct_ubias (TPM, gene_stats, fig_name=None):
+def correct_ubias (TPM, samples, gene_stats, fig_name=None):
 
-    """ do LOWESS regression of log2 elu ratio against log10 ucounts and correct to values for highest 10% of ucounts """
+    """ model log2 elu ratio as function of log10 ucounts and correct to asymptotic values """
 
     if fig_name is not None:
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib import pyplot as plt
-        fig=plt.figure(figsize=(4,3))
+        N=np.ceil(np.sqrt(len(samples)))
+        M=np.ceil(len(samples)/float(N))
+        fig=plt.figure(figsize=(2*N,2*M))
+        fig.subplots_adjust(bottom=.1,top=.95,hspace=.4,wspace=.3)
 
     print >> sys.stderr, '[correct_ubias] correcting U bias using least squares regression'
 
-    # select reliable genes with decent mean expression level in mature fractions
-    reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
-        (TPM['unlabeled-mature'] > TPM['unlabeled-mature'].dropna().quantile(.5)).any(axis=1) &\
-        (TPM['elu-mature'] > TPM['elu-mature'].dropna().quantile(.5)).any(axis=1)
-
-    # use stacked data frames (= all samples together)
-    log2_elu_ratio=np.log2(TPM['elu-mature']/TPM['unlabeled-mature']).stack(level=[0,1],dropna=False).replace([np.inf,-np.inf],np.nan)
-    log2_FT_ratio=np.log2(TPM['flowthrough-mature']/TPM['unlabeled-mature']).stack(level=[0,1],dropna=False).replace([np.inf,-np.inf],np.nan)
-
-    stacked_index=log2_elu_ratio.index
-
-    reliable_genes=reliable_genes.loc[stacked_index.get_level_values(0)]
-    reliable_genes.index=stacked_index
-
-    ucount=gene_stats['exon_ucount'].loc[stacked_index.get_level_values(0)]
-    ucount.index=stacked_index
-
-    ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(ucount)
-
-    theo_ucorr = lambda p, x, y: p[0]+np.log2(1-p[1]*np.exp(-p[2]*x))-y
-    (alpha,beta,gamma),success=scipy.optimize.leastsq(theo_ucorr, [0,.5,.001], args=(ucount[ok],log2_elu_ratio[ok]))
-    ucorr=np.log2(1.-beta*np.exp(-gamma*ucount))
-    
     UF=pd.DataFrame(1,index=TPM.index,columns=TPM.columns)
-    UF['elu-mature']=pd.Series(2**(-ucorr),index=stacked_index).unstack(level=1).unstack().fillna(1)
+
+    for n,(t,r) in enumerate(samples):
+
+        # select reliable genes with decent mean expression level in mature fractions
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+            (TPM[['unlabeled-mature','elu-mature']].xs((t,r),axis=1,level=[1,2]) > 1).all(axis=1)
+
+        log2_elu_ratio=np.log2(TPM['elu-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
+        log2_FT_ratio=np.log2(TPM['flowthrough-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
+
+        ucount=gene_stats['exon_ucount']
+
+        ok=np.isfinite(log2_elu_ratio) & reliable_genes & np.isfinite(ucount)
+
+        theo_ucorr = lambda p, x, y: p[0]+np.log2(1-p[1]*np.exp(-p[2]*x))-y
+        (alpha,beta,gamma),success=scipy.optimize.leastsq(theo_ucorr, [0,.5,.001], args=(ucount[ok],log2_elu_ratio[ok]))
+        ucorr=np.log2(1.-beta*np.exp(-gamma*ucount))
+
+        UF['elu-mature',t,r]=2**(-ucorr)
+
+        if fig_name is not None:
+
+            ax=fig.add_subplot(N,M,n+1)
+            bounds=np.concatenate([np.nanpercentile(ucount[ok],[1,99]),
+                                   np.nanpercentile(log2_elu_ratio[ok],[1,99])])
+            ax.hexbin(ucount[ok],log2_elu_ratio[ok],bins='log',extent=bounds,lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
+            plt.plot(np.linspace(bounds[0],bounds[1],100),alpha+np.log2(1.-beta*np.exp(-gamma*np.linspace(bounds[0],bounds[1],100))),'r-')
+            ax.set_xlim(bounds[:2])
+            ax.set_ylim(bounds[2:])
+            ax.set_title('t={0} {1} (n={2})'.format(t,r,ok.sum()),size=10)
+            if n >= M*(N-1):
+                ax.set_xlabel('# U residues')
+            if n%M==0:
+                ax.set_ylabel('log2 elu/unlabeled')
 
     if fig_name is not None:
-
-        ax=fig.add_axes([.15,.15,.8,.8])
-        bounds=np.concatenate([np.nanpercentile(ucount[ok],[1,99]),
-                               np.nanpercentile(log2_elu_ratio[ok],[1,99])])
-        ax.hexbin(ucount[ok],log2_elu_ratio[ok],bins='log',extent=bounds,lw=0,cmap=plt.cm.Greys,vmin=-1,mincnt=1)
-        plt.plot(np.linspace(bounds[0],bounds[1],100),alpha+np.log2(1.-beta*np.exp(-gamma*np.linspace(bounds[0],bounds[1],100))),'r-')
-        ax.set_xlim(bounds[:2])
-        ax.set_ylim(bounds[2:])
-        ax.set_ylabel('log2 elu/unlabeled')
-        ax.set_xlabel('# U residues')
-
         print >> sys.stderr, '[correct_ubias] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
 
@@ -1209,7 +1211,7 @@ if __name__ == '__main__':
     # correction factors
     print >> sys.stderr, '\n[main] correcting U bias using gene stats from '+options.gene_stats
     gene_stats=pd.concat([pd.read_csv(gsfile,index_col=0,header=0) for gsfile in options.gene_stats.split(',')],axis=0).loc[TPM.index]
-    UF=correct_ubias(TPM,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'_ubias_correction.pdf'))
+    UF=correct_ubias(TPM,samples,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'_ubias_correction.pdf'))
 
     print >> sys.stderr, '\n[main] normalizing TPMs'
     if options.normalize_over_samples:
