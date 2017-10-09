@@ -43,7 +43,7 @@ options,args=parser.parse_args()
 ########################################################################
 
 # these are prior estimates on rates a,b,c,d similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([4,-1.5,.6,-1.5]),\
+true_priors=pd.DataFrame(dict(mu=np.array([5,-1.5,.6,-2.5]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
