@@ -133,6 +133,9 @@ for ng,gene in enumerate(genes):
     model=true_gene_class[gene]
     # first draw constant baselines for each parameter
     pars=[scipy.stats.norm.rvs(true_priors.ix[mp,'mu'],true_priors.ix[mp,'std']) for mp in model.lower()]
+    # give DE genes a bit more reads (make synthesis rate 1 log higher)
+    if model!=model.lower():
+        pars[0]+=1
     # then expand this over time (add randomness of AVE_FC per time point for variable parameters)
     parameters[gene]=np.array([p*np.ones(ntimes) if mp.islower() else \
                                scipy.stats.norm.rvs(p,np.log(AVE_FC),size=ntimes) for mp,p in zip(model,pars)])
