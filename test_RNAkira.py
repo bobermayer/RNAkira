@@ -22,8 +22,9 @@ parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]"
 parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
 parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
 parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
-parser.add_option('','--use_length_library_bias',dest='use_length_library_bias',action='store_true',default=False)
-parser.add_option('','--estimate_variability',dest='estimate_variability',action='store_true',default=False)
+parser.add_option('','--no_length_library_bias',dest='no_length_library_bias',action='store_true',default=False)
+parser.add_option('','--use_true_variability',dest='use_true_variability',action='store_true',default=False)
+parser.add_option('','--use_true_normalization',dest='use_true_normalization',action='store_true',default=False)
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
 parser.add_option('','--do_direct_fits',dest='do_direct_fits',action='store_true',default=False)
 parser.add_option('','--statsmodel',dest='statsmodel',default='nbinom')
@@ -43,7 +44,7 @@ options,args=parser.parse_args()
 ########################################################################
 
 # these are prior estimates on rates a,b,c,d similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([5,-1.5,.6,-2.5]),\
+true_priors=pd.DataFrame(dict(mu=np.array([4.5,-1.5,.6,-2]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
@@ -116,10 +117,13 @@ nGenes=len(true_gene_class)
 genes=np.array(map(lambda x: '_'.join(x), zip(['gene']*nGenes,map(str,range(nGenes)),true_gene_class)))
 T=pd.Series(1,index=genes)
 
-# random lengths and ucounts for genes
-gene_stats=pd.DataFrame(dict(exon_length=(10**scipy.stats.norm.rvs(3.0,scale=.56,size=nGenes)).astype(int),\
-                             gene_type=['protein_coding']*nGenes),index=genes)
-gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
+if options.no_length_library_bias:
+    gene_stats=pd.DataFrame(dict(exon_length=1000,gene_type='protein_coding',exon_ucount=250),index=genes)
+else:
+    # random lengths and ucounts for genes
+    gene_stats=pd.DataFrame(dict(exon_length=(10**scipy.stats.norm.rvs(3.0,scale=.56,size=nGenes)).astype(int),\
+                                 gene_type=['protein_coding']*nGenes),index=genes)
+    gene_stats['exon_ucount']=1+(.25*gene_stats['exon_length']).astype(int)
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
 
@@ -146,11 +150,14 @@ stddev={}
 
 # this is used to calculate size factors for elu + flowthrough
 UF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1]) for gene in genes])
-EF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
-            (1-np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
-FF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
-            (np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
-size_factor=pd.Series([UF/EF,UF/FF,1,UF/EF,UF/FF,1,1],index=cols)
+if options.no_length_library_bias:
+    size_factor=pd.Series(1,index=cols)
+else:
+    EF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
+                (1-np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
+    FF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
+                (np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
+    size_factor=pd.Series([UF/EF,UF/FF,1,UF/EF,UF/FF,1,1],index=cols)
 
 for ng,gene in enumerate(genes):
 
@@ -175,12 +182,12 @@ for ng,gene in enumerate(genes):
 
         # get expected values given these rates
         mu=RNAkira.get_steady_state_values(parameters[gene][:,i],T[gene],model)
-        if options.use_length_library_bias:
+        if options.no_length_library_bias:
+            mu_eff=mu
+        else:
             # multiply by gene length and library size factors and introduce U-bias 
             mu_eff=mu*(gene_stats.ix[gene,'exon_length']/1.e3)*size_factor[cols_here].values
             mu_eff[0]=mu_eff[0]*ubias
-        else:
-            mu_eff=mu
 
         # get counts based on these expected values
         for m,c in zip(mu_eff,cols_here):
@@ -202,12 +209,12 @@ for ng,gene in enumerate(genes):
         vals_here=cnts.unstack(level=0)[cols_here].stack().values.reshape((len(time_points),nreps,len(cols_here)))
         std_here=std.mean(level=0)[cols_here].values
         disp_here=dsp.mean(level=0)[cols_here].values
-        if options.use_length_library_bias:
+        if options.no_length_library_bias:
+            nf_here=np.ones_like(vals_here)
+        else:
             nf_here=1./(size_factor[cols_here].values*gene_stats.ix[gene,'exon_length']/1.e3)
             nf_here[0]=nf_here[0]*ubias
             nf_here=np.tile(nf_here,(ntimes,nreps)).reshape(vals_here.shape)
-        else:
-            nf_here=np.ones_like(vals_here)
 
         if options.statsmodel=='gaussian':
             res={}
@@ -274,7 +281,17 @@ print >> sys.stderr, ''
 #### normalization, U-bias correction                               ####
 ########################################################################
 
-if options.use_length_library_bias:
+if options.use_true_normalization:
+
+    print >> sys.stderr, '[test_RNAkira] use true normalization factors'
+    LF=gene_stats['exon_length']/1.e3
+    SF=pd.Series(size_factor.repeat(len(time_points)*nreps).values,index=counts.columns)
+    UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
+    if not options.no_length_library_bias:
+        UF['elu-mature']=UF['elu-mature'].divide(1.-.5*np.exp(-gene_stats['exon_ucount']/500.),axis=0)
+    CF=pd.Series(1,index=counts.columns)
+
+else:
 
     LF=gene_stats['exon_length']/1.e3
 
@@ -292,16 +309,7 @@ if options.use_length_library_bias:
     UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'_ubias_correction.pdf' if options.save_figures else None)
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
 
-else:
-    print >> sys.stderr, '[test_RNAkira] run without library size normalization and U-bias correction'
-    LF=pd.Series(1,index=counts.index)
-    SF=pd.Series(1,index=pd.MultiIndex.from_product([cols,time_points,replicates]))
-    UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
-    CF=pd.Series(1,index=counts.columns)
-
 NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
-#NF=pd.DataFrame(1,index=NF.index,columns=NF.columns).divide(size_factor,axis=1,level=0).divide(gene_stats['exon_length']/1.e3,axis=0)
-#NF['elu-mature']*=1.-.5*np.exp(-gene_stats.ix[gene,'exon_ucount']/500.)
 
 TPM=counts.multiply(NF)
 
@@ -310,7 +318,13 @@ if options.save_normalization_factors:
     UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
                                                        header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
-if options.estimate_variability:
+if options.use_true_variability:
+    print >> sys.stderr, '[test_RNAkira] use true variability'
+    if options.statsmodel=='gaussian':
+        var=stddev.mean(axis=1,level=0)
+    else:
+        var=disp.mean(axis=1,level=0)
+else:
     if options.statsmodel=='gaussian':
         var=RNAkira.estimate_stddev (TPM, options.weight/float(nreps),\
                                      fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
@@ -318,13 +332,6 @@ if options.estimate_variability:
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
         var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps),\
                                          fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
-
-else:
-    print >> sys.stderr, '[test_RNAkira] no estimation of variability'
-    if options.statsmodel=='gaussian':
-        var=stddev.mean(axis=1,level=0)
-    else:
-        var=disp.mean(axis=1,level=0)
 
 if options.save_variability:
     print >> sys.stderr, '[test_RNAkira] saving variability estimates'
@@ -348,7 +355,7 @@ if options.save_results:
 
 tgc=true_gene_class.apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
-if options.use_length_library_bias:
+if not options.no_length_library_bias:
     # synthesis rate is measured in different units (TPM/h instead of counts)
     parameters['synthesis']-=np.log(SF['unlabeled-mature'].mean())
     if not options.no_ribo:
