@@ -1168,9 +1168,8 @@ if __name__ == '__main__':
 
         mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
         precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
-        cols=mature_cols+precursor_cols
         ribo_cols=['ribo']
-        cols+=ribo_cols
+        cols=mature_cols+precursor_cols+ribo_cols
 
         counts=pd.concat([elu_exons,flowthrough_exons,unlabeled_exons,\
                           elu_introns,flowthrough_introns,unlabeled_introns,\
