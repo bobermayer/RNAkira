@@ -23,19 +23,18 @@ parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",defa
 parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
 parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
 parser.add_option('','--no_length_library_bias',dest='no_length_library_bias',action='store_true',default=False)
+parser.add_option('','--no_ribo',dest='no_ribo',action='store_true',default=False)
 parser.add_option('','--use_true_variability',dest='use_true_variability',action='store_true',default=False)
 parser.add_option('','--use_true_normalization',dest='use_true_normalization',action='store_true',default=False)
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
 parser.add_option('','--do_direct_fits',dest='do_direct_fits',action='store_true',default=False)
 parser.add_option('','--statsmodel',dest='statsmodel',default='nbinom')
-parser.add_option('','--out_prefix',dest='out_prefix',default='test')
-parser.add_option('','--save_figures',dest='save_figures',action='store_true',default=False)
-parser.add_option('','--save_counts',dest='save_counts',action='store_true',default=False)
+parser.add_option('','--out_prefix',dest='out_prefix',default='test_')
+parser.add_option('','--save_input',dest='save_input',action='store_true',default=False)
 parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False)
-parser.add_option('','--save_results',dest='save_results',action='store_true',default=False)
-parser.add_option('','--save_parameters',dest='save_parameters',action='store_true',default=False)
 parser.add_option('','--save_variability',dest='save_variability',action='store_true',default=False)
-parser.add_option('','--no_ribo',dest='no_ribo',action='store_true',default=False)
+parser.add_option('','--save_figures',dest='save_figures',action='store_true',default=False)
+parser.add_option('','--save_results',dest='save_results',action='store_true',default=False)
 
 options,args=parser.parse_args()
 
@@ -65,8 +64,6 @@ if options.no_ribo:
         ['aBC']*75+\
         ['ABC']*50
 
-    #true_gene_class=['abc']*2000
-
 else:
 
     true_gene_class=['abcd']*4210+\
@@ -86,9 +83,27 @@ else:
         ['aBCD']*20+\
         ['ABCD']*10
 
-    # or use other designs for testing
-    #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
-    #true_gene_class=['abcd']*100
+# or use other designs for testing
+if False:
+    true_gene_class=['abcd']*605+\
+        ['Abcd']*50+\
+        ['aBcd']*50+\
+        ['abCd']*50+\
+        ['abcD']*50+\
+        ['ABcd']*25+\
+        ['AbCd']*25+\
+        ['AbcD']*25+\
+        ['aBCd']*25+\
+        ['aBcD']*25+\
+        ['abCD']*25+\
+        ['ABCd']*10+\
+        ['ABcD']*10+\
+        ['AbCD']*10+\
+        ['aBCD']*10+\
+        ['ABCD']*5
+    true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
+    true_gene_class=['abcd']*100
+    true_gene_class=['abc']*2000
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -255,6 +270,8 @@ stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
                                       index=rate_types).stack() for gene in genes],index=genes)
 
+print >> sys.stderr, ''
+
 if options.model_selection=='empirical':
     # constant genes have no intronic or ribo coverage
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:400]
@@ -265,17 +282,18 @@ if options.model_selection=='empirical':
 else:
     constant_genes=None
 
-if options.save_counts:
-    # save counts to file
-    print >> sys.stderr, '[test_RNAkira] saving counts'
-    counts.to_csv(options.out_prefix+'_counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
-
-if options.save_parameters:
-    print >> sys.stderr, '[test_RNAkira] saving parameters'
-    parameters.to_csv(options.out_prefix+'_parameters.csv',\
+if options.save_input:
+    # save input data
+    print >> sys.stderr, '[test_RNAkira] saving input'
+    dummy=pd.DataFrame('',columns=['dummy'+str(k) for k in range(4)],index=genes)
+    parameters.to_csv(options.out_prefix+'parameters.csv',\
                        header=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()],tupleize_cols=True)
-
-print >> sys.stderr, ''
+    gene_stats.to_csv(options.out_prefix+'gene_stats.csv')
+    counts.to_csv(options.out_prefix+'counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
+    for col in cols:
+        tmp=counts[col].astype(int)
+        tmp.columns=['.'.join(c) for c in tmp.columns.tolist()]
+        pd.concat([dummy,gene_stats['exon_length'],tmp],axis=1).to_csv(options.out_prefix+col+'.csv')
 
 ########################################################################
 #### normalization, U-bias correction                               ####
@@ -306,8 +324,8 @@ else:
                   RF],axis=0,keys=cols).fillna(1)
     TPM=RPK.divide(SF,axis=1)
 
-    UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'_ubias_correction.pdf' if options.save_figures else None)
-    CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'_TPM_correction.pdf' if options.save_figures else None)
+    UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'ubias_correction.pdf' if options.save_figures else None)
+    CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'TPM_correction.pdf' if options.save_figures else None)
 
 NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 
@@ -315,7 +333,7 @@ TPM=counts.multiply(NF)
 
 if options.save_normalization_factors:
     print >> sys.stderr, '[test_RNAkira] saving normalization factors'
-    UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'_normalization_factors.csv',\
+    UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'normalization_factors.csv',\
                                                        header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
 if options.use_true_variability:
@@ -327,15 +345,15 @@ if options.use_true_variability:
 else:
     if options.statsmodel=='gaussian':
         var=RNAkira.estimate_stddev (TPM, options.weight/float(nreps),\
-                                     fig_name=options.out_prefix+'_variability_stddev.pdf' if options.save_figures else None)
+                                     fig_name=options.out_prefix+'variability_stddev.pdf' if options.save_figures else None)
     else:
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
         var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps),\
-                                         fig_name=options.out_prefix+'_variability_disp.pdf' if options.save_figures else None)
+                                         fig_name=options.out_prefix+'variability_disp.pdf' if options.save_figures else None)
 
 if options.save_variability:
     print >> sys.stderr, '[test_RNAkira] saving variability estimates'
-    var.to_csv(options.out_prefix+'_variability.csv')
+    var.to_csv(options.out_prefix+'variability.csv')
 
 print >> sys.stderr, ''
 
@@ -351,7 +369,11 @@ output=RNAkira.collect_results(results, time_points, select_best=(options.model_
 
 if options.save_results:
     print >> sys.stderr, '[test_RNAkira] saving results'
-    output.to_csv(options.out_prefix+'_results.csv')
+    output.to_csv(options.out_prefix+'results.csv')
+
+########################################################################
+#### evaluate performance                                           ####
+########################################################################
 
 tgc=true_gene_class.apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
@@ -362,10 +384,6 @@ if not options.no_length_library_bias:
         # translation efficiencies cannot measure global shift
         parameters['translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
 parameters.columns=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()]
-
-########################################################################
-#### evaluate performance                                           ####
-########################################################################
 
 if options.model_selection is not None:
 
@@ -404,7 +422,7 @@ if options.model_selection is not None:
     ax.set_title(title,size=10)
 
     if options.save_figures:
-        fig.savefig(options.out_prefix+'_confusion_matrix.pdf')
+        fig.savefig(options.out_prefix+'confusion_matrix.pdf')
 
 if True: # compare fitted values directly to true rate parameters
 
@@ -438,7 +456,7 @@ if True: # compare fitted values directly to true rate parameters
     fig.suptitle('{0} genes, {1} time points, {2} replicates, {3} model'.format(nGenes,ntimes,nreps,options.statsmodel),size=10)
 
     if options.save_figures:
-        fig.savefig(options.out_prefix+'_parameter_fits.pdf')
+        fig.savefig(options.out_prefix+'parameter_fits.pdf')
 
 if options.model_selection is None:
 
@@ -491,37 +509,4 @@ if options.model_selection is None:
             leg=ax.legend(patches,list(full_model),loc=3,ncol=4,bbox_to_anchor=(-.1,-.5),title='parameter')
 
     if options.save_figures:
-        fig.savefig(options.out_prefix+'_R2_stats.pdf')
-
-if False:
-
-    fig=plt.figure(figsize=(12,3))
-    fig.clf()
-
-    ax=fig.add_axes([.12,.2,.8,.7])
-    for i,mod in enumerate(true_models):
-        for k,(m1,m2) in enumerate(zip(tested_models1[:-1],tested_models2[:-1])):
-            color='rgbcymk'[k]
-            vals=(R2[m2]-R2[m1])[use & (tgc==mod)].dropna()
-            if len(vals.unique()) > 3:
-                sgb.violinplot([vals],ax=ax,positions=[i+.2*k],show_boxplot=False,\
-                               plot_opts=dict(violin_fc=color,violin_ec=color,violin_alpha=.5,violin_width=.15,cutoff=True))
-            bp=ax.boxplot([vals],positions=[i+.2*k],widths=.1,sym='',notch=False)
-            plt.setp(bp['boxes'],color='k',linewidth=1)
-            plt.setp(bp['whiskers'],color='k',linestyle='solid',linewidth=.5)
-            plt.setp(bp['caps'],color='k')
-            plt.setp(bp['medians'],color='r')
-    patches=[mpatches.Patch(color='rgbcymk'[k],alpha=.5) for k in range(4)]
-    #ax.set_ylim([0,1])
-    #ax.set_yscale('log')
-    ax.set_xticks(np.arange(len(true_models))+2*.2)
-    ax.set_xticklabels([])
-    ax.set_xlim([-.2,len(true_models)-.2])
-    ax.set_ylabel('parameter effect on variance')
-    ax.hlines(0,-.2,len(true_models)-.2,'k',lw=.5,linestyle='dashed')
-    ax.set_xticklabels(true_models)
-    ax.set_xlabel('true model')
-    leg=ax.legend(patches,list(full_model),loc=2,ncol=4,title='parameter')
-
-
-
+        fig.savefig(options.out_prefix+'R2_stats.pdf')
