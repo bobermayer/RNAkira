@@ -1086,7 +1086,7 @@ if __name__ == '__main__':
     parser.add_option('-U','--unlabeled_exons',dest='unlabeled_exons',help="featureCounts output for unlabeled RNA mapped to exons")
     parser.add_option('-t','--time_points',dest='time_points',help="comma-separated list of time points (integer or floating-point), MUST correspondg to the data columns in the featureCount outputs and be the same for all fractions")
     parser.add_option('-T','--labeling_time',dest='T',help="labeling time (either a number or a csv file)")
-    parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira',help="output prefix [RNAkira]")
+    parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira_',help="output prefix [RNAkira]")
     parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
     parser.add_option('','--model_selection',dest='model_selection',help="model selection (using LRT or empirical)")
     parser.add_option('','--constant_genes',dest='constant_genes',help="list of constant genes for empirical FDR calculcation")
@@ -1197,8 +1197,8 @@ if __name__ == '__main__':
         TPM=RPK.divide(SF,axis=1)
 
         if options.save_TPM:
-            print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'_TPM.csv'
-            TPM.to_csv(options.out_prefix+'_TPM.csv',\
+            print >> sys.stderr, '[main] saving TPM values to '+options.out_prefix+'TPM.csv'
+            TPM.to_csv(options.out_prefix+'TPM.csv',\
                        header=['.'.join(c) for c in TPM.columns],tupleize_cols=True)
 
     if options.model_selection=='empirical' or options.normalize_over_samples:
@@ -1210,22 +1210,22 @@ if __name__ == '__main__':
     # correction factors
     print >> sys.stderr, '\n[main] correcting U bias using gene stats from '+options.gene_stats
     gene_stats=pd.concat([pd.read_csv(gsfile,index_col=0,header=0) for gsfile in options.gene_stats.split(',')],axis=0).loc[TPM.index]
-    UF=correct_ubias(TPM,samples,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'_ubias_correction.pdf'))
+    UF=correct_ubias(TPM,samples,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'ubias_correction.pdf'))
 
     print >> sys.stderr, '\n[main] normalizing TPMs'
     if options.normalize_over_samples:
         CF=normalize_elu_flowthrough_over_samples (TPM.multiply(UF), constant_genes,\
-                                                   fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
+                                                   fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
     else:
         CF=normalize_elu_flowthrough_over_genes (TPM.multiply(UF), samples,\
-                                                 fig_name=(None if options.no_plots else options.out_prefix+'_normalization.pdf'))
+                                                 fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
 
     # normalization factor combines size factors with TPM correction 
     NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
     TPM=TPM.multiply(UF).multiply(CF)
     if options.save_normalization_factors:
-        print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'_normalization_factors.csv'
-        UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'_normalization_factors.csv',\
+        print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'normalization_factors.csv'
+        UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'normalization_factors.csv',\
                                                  header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
 
@@ -1234,14 +1234,14 @@ if __name__ == '__main__':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
         variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps, \
-                                         fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
+                                         fig_name=(None if options.no_plots else options.out_prefix+'variability.pdf'))
     else:
         variability=estimate_stddev (TPM, options.weight/nreps, \
-                                     fig_name=(None if options.no_plots else options.out_prefix+'_variability.pdf'))
+                                     fig_name=(None if options.no_plots else options.out_prefix+'variability.pdf'))
 
     if options.save_variability:
-        print >> sys.stderr, '[main] saving variability estimates to '+options.out_prefix+'_variability.csv'
-        variability.to_csv(options.out_prefix+'_variability.csv')
+        print >> sys.stderr, '[main] saving variability estimates to '+options.out_prefix+'variability.csv'
+        variability.to_csv(options.out_prefix+'variability.csv')
 
     # select genes based on TPM cutoffs for mature in any of the time points
     take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) & \
@@ -1271,7 +1271,6 @@ if __name__ == '__main__':
     print >> sys.stderr, '[main] collecting output'
     output=collect_results(results, time_points, select_best=(options.model_selection is not None))
 
-    print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'_results.csv')
-
-    output.to_csv(options.out_prefix+'_results.csv')
+    print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'results.csv')
+    output.to_csv(options.out_prefix+'results.csv')
 

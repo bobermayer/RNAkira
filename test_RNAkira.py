@@ -285,7 +285,7 @@ else:
 if options.save_input:
     # save input data
     print >> sys.stderr, '[test_RNAkira] saving input'
-    dummy=pd.DataFrame('',columns=['dummy'+str(k) for k in range(4)],index=genes)
+    dummy=pd.DataFrame('',columns=['dummy'+str(k) for k in range(3)],index=genes)
     parameters.to_csv(options.out_prefix+'parameters.csv',\
                        header=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()],tupleize_cols=True)
     gene_stats.to_csv(options.out_prefix+'gene_stats.csv')
@@ -293,7 +293,7 @@ if options.save_input:
     for col in cols:
         tmp=counts[col].astype(int)
         tmp.columns=['.'.join(c) for c in tmp.columns.tolist()]
-        pd.concat([dummy,gene_stats['exon_length'],tmp],axis=1).to_csv(options.out_prefix+col+'.csv')
+        pd.concat([dummy,gene_stats['exon_length'],tmp],axis=1).to_csv(options.out_prefix+col+'.tsv',sep='\t')
 
 ########################################################################
 #### normalization, U-bias correction                               ####
