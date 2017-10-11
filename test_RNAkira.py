@@ -84,7 +84,7 @@ else:
         ['ABCD']*10
 
 # or use other designs for testing
-if True:
+if False:
     true_gene_class=['abcd']*1105+\
         ['Abcd']*50+\
         ['aBcd']*50+\
