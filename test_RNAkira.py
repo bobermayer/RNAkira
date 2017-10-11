@@ -84,8 +84,8 @@ else:
         ['ABCD']*10
 
 # or use other designs for testing
-if False:
-    true_gene_class=['abcd']*605+\
+if True:
+    true_gene_class=['abcd']*1105+\
         ['Abcd']*50+\
         ['aBcd']*50+\
         ['abCd']*50+\
@@ -101,9 +101,10 @@ if False:
         ['AbCD']*10+\
         ['aBCD']*10+\
         ['ABCD']*5
-    true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
-    true_gene_class=['abcd']*100
-    true_gene_class=['abc']*2000
+
+    #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
+    #true_gene_class=['abcd']*100
+    #true_gene_class=['abc']*2000
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -285,7 +286,7 @@ else:
 if options.save_input:
     # save input data
     print >> sys.stderr, '[test_RNAkira] saving input'
-    dummy=pd.DataFrame('',columns=['dummy'+str(k) for k in range(3)],index=genes)
+    dummy=pd.DataFrame('NA',columns=['dummy'+str(k) for k in range(4)],index=genes)
     parameters.to_csv(options.out_prefix+'parameters.csv',\
                        header=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()],tupleize_cols=True)
     gene_stats.to_csv(options.out_prefix+'gene_stats.csv')
@@ -348,7 +349,8 @@ else:
                                      fig_name=options.out_prefix+'variability_stddev.pdf' if options.save_figures else None)
     else:
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
-        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps),\
+        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1),\
+                                         options.weight/float(nreps),\
                                          fig_name=options.out_prefix+'variability_disp.pdf' if options.save_figures else None)
 
 if options.save_variability:
@@ -361,11 +363,14 @@ print >> sys.stderr, ''
 #### RNAkira results                                                ####
 ########################################################################
 
-results=RNAkira.RNAkira(counts, var, NF, T, alpha=options.alpha, model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
-                        constant_genes=constant_genes, maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
+take=(TPM['unlabeled-mature'] > .1).any(axis=1) & \
+    ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
+
+results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], alpha=options.alpha, model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
+                        constant_genes=np.intersect1d(constant_genes,TPM[take].index), maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
-output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes]
+output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes][take]
 
 if options.save_results:
     print >> sys.stderr, '[test_RNAkira] saving results'
@@ -375,7 +380,7 @@ if options.save_results:
 #### evaluate performance                                           ####
 ########################################################################
 
-tgc=true_gene_class.apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
+tgc=true_gene_class[take].apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
 if not options.no_length_library_bias:
     # synthesis rate is measured in different units (TPM/h instead of counts)
@@ -384,6 +389,9 @@ if not options.no_length_library_bias:
         # translation efficiencies cannot measure global shift
         parameters['translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
 parameters.columns=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()]
+parameters=parameters[take]
+genes=genes[take]
+nGenes=len(genes)
 
 if options.model_selection is not None:
 

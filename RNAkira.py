@@ -366,93 +366,6 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
 
     return result
 
-def plot_data_rates_fits (time_points, replicates, TPM, T, parameters, results, use_precursor, use_ribo, title='', priors=None, alpha=0.01):
-
-    """ function to plot summary of results for a specific gene; NEEDS TO BE FIXED!! """
-
-    import matplotlib
-    matplotlib.use('Agg')
-    from matplotlib import pyplot as plt
-
-    times=np.array(map(float,time_points))
-    ntimes=len(times)
-
-    def jitter():
-        return np.random.normal(loc=0,scale=.1*np.min(np.diff(times)),size=len(time_points))
-
-    cols=['elu-mature','flowthrough-mature','unlabeled-mature']
-    rates=['synthesis','degradation']
-    if use_precursor: 
-        cols+=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
-        rates+=['processing']
-    if use_ribo:
-        cols+=['ribo']
-        rates+=['translation']
-
-    nrates=len(rates)
-    ndim=len(cols)
-
-    fig=plt.figure(figsize=(15,6))
-    fig.clf()
-    fig.subplots_adjust(wspace=.5,hspace=.4,left=.05,right=.98)
-
-    ax=[fig.add_subplot(2,ndim,i+1) for i in range(ndim+nrates)]
-
-    # first plot data and fits to data
-
-    for i in range(ndim):
-        for r in replicates:
-            ax[i].plot(times,TPM[cols[i]].xs(r,level=1),'ko',label='_nolegend_',mfc='none')
-
-    if parameters is not None:
-        exp_vals=get_steady_state_values(get_rates(time_points,parameters),T,use_precursor,use_ribo)
-        for i in range(ndim):
-            ax[i].plot(times,exp_vals[i],'k-',label='theo. mean')
-
-    for level,vals in enumerate(results):
-        pred_vals=get_steady_state_values(get_rates(time_points,vals['est_pars']),T,use_precursor,use_ribo)
-        for i in range(ndim):
-            if level > 1:
-                qval=vals['LRT-q']
-                ax[i].plot(times,pred_vals[i],linestyle=('-' if qval <= alpha else '--'),\
-                           label='{0} (q={1:.2g})'.format(vals['model'],qval))
-            elif level==1:
-                ax[i].plot(times,pred_vals[i],linestyle='-', label='{0}'.format(vals['model']))
-            else:
-                ax[i].plot(times,pred_vals[i],linestyle=':',label='initial')
-
-    for i,c in enumerate(cols):
-        ax[i].set_title(c,size=10)
-        ax[i].set_xlabel('time')
-
-    ax[0].set_ylabel('expression')
-
-    # then plot rates and fits to rates
-    if parameters is not None:
-        for i,p in enumerate(get_rates(time_points, parameters)):
-            ax[ndim+i].plot(times,p,'k.-',label='true')
-
-    if priors is not None:
-        for i in range(nrates):
-            ax[ndim+i].fill_between(times,np.ones(ntimes)*(priors.ix[i,'mu']-1.96*priors.ix[i,'std']),\
-                                 y2=np.ones(ntimes)*(priors.ix[i,'mu']+1.96*priors.ix[i,'std']),color='Gray',alpha=.25,label='95% prior')
-    for level,vals in enumerate(results):
-        for i,p in enumerate(get_rates(time_points,vals['est_pars'])):
-            qval=vals['LRT-q']
-            if level >= 1:
-                ax[ndim+i].plot(times,p,linestyle=('-' if qval <= alpha else '--'),label='{0} (q={1:.2g})'.format(vals['model'],qval))
-            else:
-                ax[ndim+i].plot(times,p,linestyle=':',label='initial')
-
-    for i,r in enumerate(rates):
-        ax[ndim+i].set_title(r)
-        ax[ndim+i].set_xlabel('time')
-
-    ax[ndim+nrates-1].legend(loc=2,frameon=False,prop={'size':10},bbox_to_anchor=(1.1,1))
-
-    fig.suptitle(title)
-
-
 def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
@@ -1222,7 +1135,7 @@ if __name__ == '__main__':
 
     # normalization factor combines size factors with TPM correction 
     NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
-    TPM=TPM.multiply(UF).multiply(CF)
+    TPM=counts.multiply(NF)
     if options.save_normalization_factors:
         print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'normalization_factors.csv'
         UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'normalization_factors.csv',\
@@ -1233,10 +1146,10 @@ if __name__ == '__main__':
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
-        variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/nreps, \
+        variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps), \
                                          fig_name=(None if options.no_plots else options.out_prefix+'variability.pdf'))
     else:
-        variability=estimate_stddev (TPM, options.weight/nreps, \
+        variability=estimate_stddev (TPM, options.weight/float(nreps), \
                                      fig_name=(None if options.no_plots else options.out_prefix+'variability.pdf'))
 
     if options.save_variability:
