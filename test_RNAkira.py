@@ -43,7 +43,7 @@ options,args=parser.parse_args()
 ########################################################################
 
 # these are prior estimates on rates a,b,c,d similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([4,-1.5,.6,-2]),\
+true_priors=pd.DataFrame(dict(mu=np.array([4.5,-1.5,.6,-2]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
@@ -86,25 +86,27 @@ else:
 # or use other designs for testing
 if False:
 
-    true_gene_class=['abcd']*1463+\
-        ['Abcd']*5+\
-        ['aBcd']*5+\
-        ['abCd']*5+\
-        ['abcD']*5+\
-        ['ABcd']*2+\
-        ['AbCd']*2+\
-        ['AbcD']*2+\
-        ['aBCd']*2+\
-        ['aBcD']*2+\
-        ['abCD']*2+\
-        ['ABCd']*1+\
-        ['ABcD']*1+\
-        ['AbCD']*1+\
-        ['aBCD']*1+\
-        ['ABCD']*1
+    true_gene_class=['abcd']*1835+\
+        ['Abcd']*20+\
+        ['aBcd']*20+\
+        ['abCd']*20+\
+        ['abcD']*20+\
+        ['ABcd']*10+\
+        ['AbCd']*10+\
+        ['AbcD']*10+\
+        ['aBCd']*10+\
+        ['aBcD']*10+\
+        ['abCD']*10+\
+        ['ABCd']*5+\
+        ['ABcD']*5+\
+        ['AbCD']*5+\
+        ['aBCD']*5+\
+        ['ABCD']*5
 
     #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
     #true_gene_class=['abcd']*100
+    #full_model='ABC'
+    #rate_types=['synthesis','degradation','processing']
     #true_gene_class=['abcd']*2000
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
@@ -312,19 +314,21 @@ if options.use_true_normalization:
     if not options.no_length_library_bias:
         UF['elu-mature']=UF['elu-mature'].divide(1.-.5*np.exp(-gene_stats['exon_ucount']/500.),axis=0)
     CF=pd.Series(1,index=counts.columns)
+    NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 
 else:
 
     # normalize by "sequencing depth" and length (so here TPM=RPKM)
     LF=gene_stats['exon_length']/1.e3
-    EF=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
-    FF=(counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
-    UF=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
-    RF=counts['ribo'].sum(axis=0)/1.e6
+    RPK=counts.divide(LF,axis=0)
+    EF=(RPK['elu-mature'].add(RPK['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
+    FF=(RPK['flowthrough-mature'].add(RPK['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
+    UF=RPK['unlabeled-mature'].add(RPK['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
+    RF=RPK['ribo'].sum(axis=0)/1.e6
     SF=pd.concat([EF,FF,UF,\
                   EF,FF,UF,\
                   RF],axis=0,keys=cols).fillna(1)
-    TPM=counts.divide(LF,axis=0).divide(SF,axis=1)
+    TPM=RPK.divide(SF,axis=1)
 
     if options.no_length_library_bias:
         UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
@@ -332,7 +336,7 @@ else:
         UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'ubias_correction.pdf' if options.save_figures else None)
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'TPM_correction.pdf' if options.save_figures else None)
 
-NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
+    NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 
 TPM=counts.multiply(NF)
 
