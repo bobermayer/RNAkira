@@ -43,7 +43,7 @@ options,args=parser.parse_args()
 ########################################################################
 
 # these are prior estimates on rates a,b,c,d similar to what we observe in our data
-true_priors=pd.DataFrame(dict(mu=np.array([4.5,-1.5,.6,-2]),\
+true_priors=pd.DataFrame(dict(mu=np.array([4,-1.5,.6,-2]),\
                               std=np.array([2,1,.5,.5])),\
                          index=list("abcd"))
 
@@ -55,7 +55,7 @@ if options.no_ribo:
     full_model='ABC'
     rate_types=['synthesis','degradation','processing']
 
-    true_gene_class=['abc']*4275+\
+    true_gene_class=['abc']*9275+\
         ['Abc']*150+\
         ['aBc']*150+\
         ['abC']*150+\
@@ -66,7 +66,7 @@ if options.no_ribo:
 
 else:
 
-    true_gene_class=['abcd']*4210+\
+    true_gene_class=['abcd']*9210+\
         ['Abcd']*100+\
         ['aBcd']*100+\
         ['abCd']*100+\
@@ -85,26 +85,27 @@ else:
 
 # or use other designs for testing
 if False:
-    true_gene_class=['abcd']*1105+\
-        ['Abcd']*50+\
-        ['aBcd']*50+\
-        ['abCd']*50+\
-        ['abcD']*50+\
-        ['ABcd']*25+\
-        ['AbCd']*25+\
-        ['AbcD']*25+\
-        ['aBCd']*25+\
-        ['aBcD']*25+\
-        ['abCD']*25+\
-        ['ABCd']*10+\
-        ['ABcD']*10+\
-        ['AbCD']*10+\
-        ['aBCD']*10+\
-        ['ABCD']*5
+
+    true_gene_class=['abcd']*1463+\
+        ['Abcd']*5+\
+        ['aBcd']*5+\
+        ['abCd']*5+\
+        ['abcD']*5+\
+        ['ABcd']*2+\
+        ['AbCd']*2+\
+        ['AbcD']*2+\
+        ['aBCd']*2+\
+        ['aBcD']*2+\
+        ['abCD']*2+\
+        ['ABCd']*1+\
+        ['ABcD']*1+\
+        ['AbCD']*1+\
+        ['aBCD']*1+\
+        ['ABCD']*1
 
     #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
     #true_gene_class=['abcd']*100
-    #true_gene_class=['abc']*2000
+    #true_gene_class=['abcd']*2000
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -143,10 +144,10 @@ else:
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
 
-parameters={}
-
 print >> sys.stderr, '[test_RNAkira] drawing parameters for {0} genes ({1} time points, {2} replicates)'.format(nGenes,ntimes,nreps)
 print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
+
+parameters={}
 
 for ng,gene in enumerate(genes):
 
@@ -160,19 +161,22 @@ for ng,gene in enumerate(genes):
     parameters[gene]=np.array([p*np.ones(ntimes) if mp.islower() else \
                                scipy.stats.norm.rvs(p,np.log(AVE_FC),size=ntimes) for mp,p in zip(model,pars)])
 
+parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
+                                      index=rate_types).stack() for gene in genes],index=genes)
+
 counts={}
 disp={}
 stddev={}
 
 # this is used to calculate size factors for elu + flowthrough
-UF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1]) for gene in genes])
 if options.no_length_library_bias:
     size_factor=pd.Series(1,index=cols)
 else:
-    EF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
-                (1-np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
-    FF=np.mean([np.exp(parameters[gene].mean(1)[0]-parameters[gene].mean(1)[1])*\
-                (np.exp(-np.exp(parameters[gene].mean(1)[1])*T)) for gene in genes])
+    UF=np.exp(parameters['synthesis']-parameters['degradation']).mean(axis=0).mean()
+    EF=(np.exp(parameters['synthesis']-parameters['degradation'])*\
+        (1-np.exp(-np.exp(parameters['degradation']).multiply(T,axis=0)))).mean(axis=0).mean()
+    FF=(np.exp(parameters['synthesis']-parameters['degradation'])*\
+        (np.exp(-np.exp(parameters['degradation']).multiply(T,axis=0)))).mean(axis=0).mean()
     size_factor=pd.Series([UF/EF,UF/FF,1,UF/EF,UF/FF,1,1],index=cols)
 
 for ng,gene in enumerate(genes):
@@ -180,6 +184,7 @@ for ng,gene in enumerate(genes):
     print >> sys.stderr, '[test_RNAkira] {0} genes initialized\r'.format(ng+1),
 
     # now get random values for observations according to these rate parameters
+    pars=parameters.loc[gene]
     cnts=pd.Series(index=pd.MultiIndex.from_product([cols,time_points,replicates]))
     std=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
     dsp=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
@@ -194,15 +199,15 @@ for ng,gene in enumerate(genes):
     if 'd' in model.lower():
         cols_here+=['ribo']
 
-    for i,t in enumerate(time_points):
+    for t in time_points:
 
         # get expected values given these rates
-        mu=RNAkira.get_steady_state_values(parameters[gene][:,i],T[gene],model)
+        mu=RNAkira.get_steady_state_values(pars.xs(t,level=1),T[gene],model)
         if options.no_length_library_bias:
             mu_eff=mu
         else:
             # multiply by gene length and library size factors and introduce U-bias 
-            mu_eff=mu*(gene_stats.ix[gene,'exon_length']/1.e3)*size_factor[cols_here].values
+            mu_eff=mu*(gene_stats.ix[gene,'exon_length']/1.e3)*size_factor[cols_here]
             mu_eff[0]=mu_eff[0]*ubias
 
         # get counts based on these expected values
@@ -268,8 +273,6 @@ for ng,gene in enumerate(genes):
 counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
-parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
-                                      index=rate_types).stack() for gene in genes],index=genes)
 
 print >> sys.stderr, ''
 
@@ -292,7 +295,7 @@ if options.save_input:
     gene_stats.to_csv(options.out_prefix+'gene_stats.csv')
     counts.to_csv(options.out_prefix+'counts.csv',header=['.'.join(c) for c in counts.columns.tolist()],tupleize_cols=True)
     for col in cols:
-        tmp=counts[col].astype(int)
+        tmp=counts[col].fillna(0).astype(int)
         tmp.columns=['.'.join(c) for c in tmp.columns.tolist()]
         pd.concat([dummy,gene_stats['exon_length'],tmp],axis=1).to_csv(options.out_prefix+col+'.tsv',sep='\t')
 
@@ -312,20 +315,21 @@ if options.use_true_normalization:
 
 else:
 
+    # normalize by "sequencing depth" and length (so here TPM=RPKM)
     LF=gene_stats['exon_length']/1.e3
-
-    # normalize by "sequencing depth"
-    RPK=counts.divide(LF,axis=0)
-    EF=(RPK['elu-mature'].add(RPK['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
-    FF=(RPK['flowthrough-mature'].add(RPK['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
-    UF=RPK['unlabeled-mature'].add(RPK['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
-    RF=RPK['ribo'].sum(axis=0)/1.e6
+    EF=(counts['elu-mature'].add(counts['elu-precursor'],fill_value=0).sum(axis=0))/1.e6
+    FF=(counts['flowthrough-mature'].add(counts['flowthrough-precursor'],fill_value=0).sum(axis=0))/1.e6
+    UF=counts['unlabeled-mature'].add(counts['unlabeled-precursor'],fill_value=0).sum(axis=0)/1.e6
+    RF=counts['ribo'].sum(axis=0)/1.e6
     SF=pd.concat([EF,FF,UF,\
                   EF,FF,UF,\
                   RF],axis=0,keys=cols).fillna(1)
-    TPM=RPK.divide(SF,axis=1)
+    TPM=counts.divide(LF,axis=0).divide(SF,axis=1)
 
-    UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'ubias_correction.pdf' if options.save_figures else None)
+    if options.no_length_library_bias:
+        UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
+    else:
+        UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'ubias_correction.pdf' if options.save_figures else None)
     CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'TPM_correction.pdf' if options.save_figures else None)
 
 NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)

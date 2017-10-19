@@ -718,6 +718,7 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
         FT_ratio=(TPM['flowthrough-mature',t,r]/TPM['unlabeled-mature',t,r]).replace([np.inf,-np.inf],np.nan)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
+        #slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
         slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1],\
                                        we=elu_ratio[ok].std(),wd=FT_ratio[ok].std())
 
