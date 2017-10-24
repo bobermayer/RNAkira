@@ -18,7 +18,8 @@ np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 
 parser=OptionParser()
 parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
-parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
+parser.add_option('','--alpha',dest='alpha',help="model selection q-value cutoff [0.05]",default=0.05,type=float)
+parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
 parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
 parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
 parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
@@ -374,7 +375,8 @@ print >> sys.stderr, ''
 take=(TPM['unlabeled-mature'] > .1).any(axis=1) & \
     ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
 
-results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], alpha=options.alpha, model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
+results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], alpha=options.alpha, LFC_cutoff=options.LFC_cutoff, \
+                        model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
                         constant_genes=np.intersect1d(constant_genes,TPM[take].index), maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 

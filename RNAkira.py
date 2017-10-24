@@ -241,24 +241,25 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
         # first add to log-likelihood the priors on rates at each time point (normal distribution with mu and std)
         diff=log_rates[i]-prior_mu
         fun+=np.sum(-.5*(diff/prior_std)**2-.5*np.log(2.*np.pi)-np.log(prior_std))
-
+        
         if use_deriv:
             # add derivatives of rate parameters
             grad[gg[t]]+=(-diff/prior_std**2)
-
+            
         # get expected mean values (and their derivatives)
         if use_deriv:
             exp_mean,exp_mean_deriv=get_steady_state_values(log_rates[i],T,model,use_deriv)
         else:
             exp_mean=get_steady_state_values(log_rates[i],T,model)
 
+        # add gaussian or neg. binomial log-likelihood 
         if statsmodel=='gaussian':
             # here "var" is stddev
             diff=vals[i]-exp_mean/nf[i]
             fun+=np.sum(scipy.stats.norm.logpdf(diff,scale=var/nf[i]))
             if use_deriv:
                 grad[gg[t]]+=np.dot(exp_mean_deriv,np.sum(diff*nf[i]/var**2,axis=0))
-
+                
         elif statsmodel=='nbinom':
             # here "var" is dispersion
             mu=exp_mean/nf[i]
@@ -286,7 +287,7 @@ def steady_state_residuals (x, vals, nf, T, time_points, model):
     ntimes=len(time_points)
     log_rates=get_rates(x, ntimes, model)
     ncols=3+3*('c' in model.lower())+('d' in model.lower())
-    
+
     res=np.zeros(ncols)
     # add up model residuals for each time point and each replicate
     for i in range(ntimes):
@@ -337,7 +338,7 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
                                 initial_estimate,\
                                 args=args, \
                                 **min_args)
-
+    
     # get sums of squares for coefficient of determination
     SSres=steady_state_residuals(res.x,vals,nf,T,time_points,model)
     mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
@@ -356,17 +357,19 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
                 message=res.message,\
                 npars=len(res.x),
                 model=model)
-
+    
     if parent is not None:
         # calculate p-value from LRT test using chi2 distribution
         pval=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
         result['LRT-p']=(pval if np.isfinite(pval) else np.nan)
+        # get aggregated log fold change of inferred parameters between these models
+        result['tot_LFC']=(result['est_pars']-parent['est_pars']).abs().sum().sum()
     else:
         result['LRT-p']=np.nan
-
+        
     return result
 
-def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
+def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
         estimates empirical priors and fits models of increasing complexity """
@@ -375,7 +378,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
     time_points=np.unique(vals.columns.get_level_values(1))
     ntimes=len(time_points)
     nreps=len(np.unique(vals.columns.get_level_values(2)))
-
+    
     ndim=7
     TPM=vals.multiply(NF)
 
@@ -568,7 +571,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
             nsig=0
             for gene,q in qvals.iteritems():
                 model_results[gene]['LRT-q']=q
-                if (model_selection=='LRT' and model_results[gene]['LRT-q'] <= alpha) or \
+                if (model_selection=='LRT' and model_results[gene]['LRT-q'] <= alpha and model_results[gene]['tot_LFC'] >= LFC_cutoff) or \
                    (model_selection=='empirical' and model_results[gene]['LRT-p'] <= alpha_eff):
                     model_results[gene]['significant']=True
                     nsig+=1
@@ -576,7 +579,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
             # print status 
             message='   model: {0}, {1} fits'.format(model,nfits)
             if model_selection is not None:
-                message +=' ({0} {2} at alpha={1:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient')
+                message +=' ({0} {2} at alpha={1:.2g} and LFC >= {3:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient',LFC_cutoff)
             if nfits > 0:
                 print >> sys.stderr, message
 
@@ -599,6 +602,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
             complete['significant']=False
             pval=scipy.stats.chi2.sf(2*np.abs(complete['logL']-best_fit['logL']),np.abs(complete['npars']-best_fit['npars']))
             complete['LRT-p']=(pval if np.isfinite(pval) else np.nan)
+            complete['tot_LFC']=(complete['est_pars']-best_fit['est_pars']).abs().sum().sum()
             results[gene][max_level+1]=complete
             pvals[gene]=pval
 
@@ -610,13 +614,13 @@ def RNAkira (vals, var, NF, T, alpha=0.05, model_selection=None, min_precursor=1
             if 'LRT-q' in complete:
                 raise Exception("this model shouldn't have a q-value yet!")
             complete['LRT-q']=q
-            if (model_selection=='LRT' and complete['LRT-q'] <= alpha) or \
+            if (model_selection=='LRT' and complete['LRT-q'] <= alpha and complete['tot_LFC'] >= LFC_cutoff) or \
                (model_selection=='empirical' and complete['LRT-p'] <= alpha_eff):
                 complete['significant']=True
                 nsig+=1
 
         if len(pvals) > 0:
-            print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g}\n'.format(nsig,alpha)
+            print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g} and LFC >= {2:.2g}\n'.format(nsig,alpha,LFC_cutoff)
 
     print >> sys.stderr, '[RNAkira] done'
 
@@ -666,6 +670,7 @@ def collect_results (results, time_points, select_best=False):
                  ('modeled_AIC',best_fit['AIC']),\
                  ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
                  ('modeled_qval',best_fit['LRT-q'] if 'LRT-q' in best_fit else np.nan),\
+                 ('tot_LFC',best_fit['tot_LFC'] if 'tot_LFC' in best_fit else np.nan),\
                  ('best_model',best_fit['model'])]
 
         else:
