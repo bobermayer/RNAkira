@@ -1007,6 +1007,7 @@ if __name__ == '__main__':
     parser.add_option('-T','--labeling_time',dest='T',help="labeling time (either a number or a csv file)")
     parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira_',help="output prefix [RNAkira]")
     parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
+    parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
     parser.add_option('','--model_selection',dest='model_selection',help="model selection (using LRT or empirical)")
     parser.add_option('','--constant_genes',dest='constant_genes',help="list of constant genes for empirical FDR calculcation")
     parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
@@ -1177,15 +1178,23 @@ if __name__ == '__main__':
     print >> sys.stderr, '\n[main] running RNAkira'
     if options.input_TPM is None:
         results=RNAkira(counts[take], variability[take], NF[take], T[take], \
-                        alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
-                        min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
-                        maxlevel=options.maxlevel, statsmodel=options.statsmodel)
+                        alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
+                        model_selection=options.model_selection, \
+                        constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                        min_precursor=options.min_precursor, \
+                        min_ribo=options.min_ribo,\
+                        maxlevel=options.maxlevel, \
+                        statsmodel=options.statsmodel)
     else:
         # now TPMs already include correction factors, so use NF=1
         results=RNAkira(TPM[take], variability[take], pd.DataFrame(1.0,index=NF.index,columns=NF.columns)[take], T[take], \
-                        alpha=options.alpha, model_selection=options.model_selection, constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
-                        min_precursor=options.min_precursor, min_ribo=options.min_ribo,\
-                        maxlevel=options.maxlevel, statsmodel=options.statsmodel)
+                        alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
+                        model_selection=options.model_selection, \
+                        constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                        min_precursor=options.min_precursor, \
+                        min_ribo=options.min_ribo,\
+                        maxlevel=options.maxlevel, \
+                        statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
     output=collect_results(results, time_points, select_best=(options.model_selection is not None))
