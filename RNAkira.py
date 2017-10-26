@@ -369,7 +369,8 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
         
     return result
 
-def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, min_precursor=1, min_ribo=1, models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='gaussian'):
+def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, min_precursor=.1, min_ribo=1, \
+             models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='nbinom'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
         estimates empirical priors and fits models of increasing complexity """
@@ -396,7 +397,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
     print >> sys.stderr, '          {0:5d} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '[RNAkira] {0} time points, {1} replicates, {2} model'.format(ntimes,nreps,statsmodel)
     if model_selection=='LRT':
-        print >> sys.stderr, '[RNAkira] model selection: LRT with alpha={0:.2g}'.format(alpha)
+        print >> sys.stderr, '[RNAkira] model selection: LRT with alpha={0:.2g} and LFC>={0:.2f}'.format(alpha,LFC_cutoff)
     elif model_selection=='empirical':
         set_new_alpha=False
         alpha_eff=alpha
@@ -1120,9 +1121,8 @@ if __name__ == '__main__':
     TPM=counts.multiply(NF)
     if options.save_normalization_factors:
         print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'normalization_factors.csv'
-        UF.multiply(CF).divide(SF,axis=1).to_csv(options.out_prefix+'normalization_factors.csv',\
-                                                 header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
-
+        UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'normalization_factors.csv',\
+                                                           header=['.'.join(c) for c in NF.columns.tolist()],tupleize_cols=True)
 
     print >> sys.stderr, '\n[main] estimating variability'
     if options.statsmodel=='nbinom':
