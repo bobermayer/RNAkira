@@ -381,7 +381,7 @@ print >> sys.stderr, ''
 #### RNAkira results                                                ####
 ########################################################################
 
-take=(TPM['unlabeled-mature'] > .1).any(axis=1) & \
+take=(TPM['unlabeled-mature'] > 1).any(axis=1) & \
     ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
 
 results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], \
