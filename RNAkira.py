@@ -61,7 +61,12 @@ def get_model_definitions(nlevels,take_all=True):
                 level_models.update({pars.upper(): []})
             elif level==1:
                 level_models.update({pars: ([pars.upper()])})
-            elif take_all and level <= len(pars):
+            elif level==2 and not take_all:
+                for pc in itertools.combinations(pars,1):
+                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
+                for pc in itertools.combinations(pars,len(pars)-1):
+                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
+            elif take_all:
                 # get all combination of the variable pars
                 for pc in itertools.combinations(pars,level-1):
                     # find parent model that use a subset of these parameters
@@ -70,11 +75,6 @@ def get_model_definitions(nlevels,take_all=True):
                     else:
                         parent_models=[pars.translate(maketrans(''.join(x),''.join(x).upper())) for x in itertools.combinations(pars,level-2) if set(x) < set(pc)]
                     level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): parent_models})
-            elif level==2 and not take_all:
-                for pc in itertools.combinations(pars,1):
-                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
-                for pc in itertools.combinations(pars,len(pars)-1):
-                    level_models.update({pars.translate(maketrans(''.join(pc),''.join(pc).upper())): pars})
         models.update({level: level_models})
 
     return models
@@ -412,7 +412,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
 
     if models is None:
         if model_selection is not None:
-            nlevels=5 if maxlevel is None else maxlevel+1
+            nlevels=6 if maxlevel is None else maxlevel+1
             models=get_model_definitions(nlevels,take_all=True)
         else:
             nlevels=3
@@ -546,12 +546,20 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
                 if level > 1 and model_selection is not None and not parent['significant']:
                     continue
 
-                # make numpy arrays out of vals, var and NF for computational efficiency
-                vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
-                var_here=var.loc[gene][cols].values
-                nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
-
-                result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
+                if model.isupper():
+                    # this is identical to initial model, so no computation necessary
+                    result=results[gene][0].copy()
+                    result['significant']=False
+                    pval=scipy.stats.chi2.sf(2*np.abs(result['logL']-parent['logL']),np.abs(result['npars']-parent['npars']))
+                    result['LRT-p']=(pval if np.isfinite(pval) else np.nan)
+                    result['tot_LFC']=(result['est_pars']-parent['est_pars']).abs().sum().sum()
+                else:
+                    # make numpy arrays out of vals, var and NF for computational efficiency
+                    vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
+                    var_here=var.loc[gene][cols].values
+                    nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
+                    result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, \
+                                      model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
 
                 model_results[gene]=result
                 level_results[gene][model]=result
@@ -579,7 +587,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             # print status 
             message='   model: {0}, {1} fits'.format(model,nfits)
             if model_selection is not None:
-                message +=' ({0} {2} at alpha={1:.2g} and LFC >= {3:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient',LFC_cutoff)
+                message +=' ({0} {2} at alpha={1:.2g} and LFC>={3:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient',LFC_cutoff)
             if nfits > 0:
                 print >> sys.stderr, message
 
@@ -588,39 +596,6 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             # select best model at this level
             if len(level_results[gene]) > 0:
                 results[gene][level]=max(all_results[gene][level].values(),key=lambda x: x['logL'])
-
-    if model_selection is not None:
-
-        pvals={}
-        # now re-evaluate initial model and add to list at higher level
-        for gene in genes:
-            max_level=max(l for l in results[gene].keys() if results[gene][l]['significant'] or l==1)
-            if max_level==0:
-                continue
-            best_fit=results[gene][max_level]
-            complete=results[gene][0].copy()
-            complete['significant']=False
-            pval=scipy.stats.chi2.sf(2*np.abs(complete['logL']-best_fit['logL']),np.abs(complete['npars']-best_fit['npars']))
-            complete['LRT-p']=(pval if np.isfinite(pval) else np.nan)
-            complete['tot_LFC']=(complete['est_pars']-best_fit['est_pars']).abs().sum().sum()
-            results[gene][max_level+1]=complete
-            pvals[gene]=pval
-
-        # determine if this is better than best fit, add it to list at higher level
-        qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
-        nsig=0
-        for gene,q in qvals.iteritems():
-            complete=[v for k,v in results[gene].iteritems() if v['model'].isupper()][-1]
-            if 'LRT-q' in complete:
-                raise Exception("this model shouldn't have a q-value yet!")
-            complete['LRT-q']=q
-            if (model_selection=='LRT' and complete['LRT-q'] <= alpha and complete['tot_LFC'] >= LFC_cutoff) or \
-               (model_selection=='empirical' and complete['LRT-p'] <= alpha_eff):
-                complete['significant']=True
-                nsig+=1
-
-        if len(pvals) > 0:
-            print >> sys.stderr, '   using initial fit: {0} improved at alpha={1:.2g} and LFC >= {2:.2g}\n'.format(nsig,alpha,LFC_cutoff)
 
     print >> sys.stderr, '[RNAkira] done'
 
@@ -1010,7 +985,7 @@ if __name__ == '__main__':
     parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
     parser.add_option('','--model_selection',dest='model_selection',help="model selection (using LRT or empirical)")
     parser.add_option('','--constant_genes',dest='constant_genes',help="list of constant genes for empirical FDR calculcation")
-    parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
+    parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)

@@ -17,7 +17,7 @@ np.random.seed(0)
 np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
 
 parser=OptionParser()
-parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [4]",default=4,type=int)
+parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
 parser.add_option('','--alpha',dest='alpha',help="model selection q-value cutoff [0.05]",default=0.05,type=float)
 parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
 parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
@@ -87,7 +87,7 @@ else:
 # or use other designs for testing
 if False:
 
-    true_gene_class=['abcd']*1835+\
+    true_gene_class=['abcd']*835+\
         ['Abcd']*20+\
         ['aBcd']*20+\
         ['abCd']*20+\
@@ -106,9 +106,18 @@ if False:
 
     #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
     #true_gene_class=['abcd']*100
-    #full_model='ABC'
-    #rate_types=['synthesis','degradation','processing']
-    #true_gene_class=['abcd']*2000
+    full_model='ABC'
+    rate_types=['synthesis','degradation','processing']
+    true_gene_class=['abc']*2000
+
+    true_gene_class=['abc']*905+\
+        ['Abc']*20+\
+        ['aBc']*20+\
+        ['abC']*20+\
+        ['ABc']*10+\
+        ['AbC']*10+\
+        ['aBC']*10+\
+        ['ABC']*5
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
@@ -375,9 +384,11 @@ print >> sys.stderr, ''
 take=(TPM['unlabeled-mature'] > .1).any(axis=1) & \
     ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
 
-results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], alpha=options.alpha, LFC_cutoff=options.LFC_cutoff, \
-                        model_selection=options.model_selection, min_ribo=.1, min_precursor=.1, \
-                        constant_genes=np.intersect1d(constant_genes,TPM[take].index), maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
+results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], \
+                        alpha=options.alpha, LFC_cutoff=options.LFC_cutoff, \
+                        model_selection=options.model_selection, \
+                        constant_genes=np.intersect1d(constant_genes,TPM[take].index), \
+                        maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None)
 
 output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes][take]
