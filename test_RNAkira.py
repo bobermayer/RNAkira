@@ -30,6 +30,7 @@ parser.add_option('','--use_true_normalization',dest='use_true_normalization',ac
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
 parser.add_option('','--do_direct_fits',dest='do_direct_fits',action='store_true',default=False)
 parser.add_option('','--statsmodel',dest='statsmodel',default='nbinom')
+parser.add_option('','--prior_weight',dest='prior_weight',default=1,type=float)
 parser.add_option('','--out_prefix',dest='out_prefix',default='test_')
 parser.add_option('','--save_input',dest='save_input',action='store_true',default=False)
 parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False)
@@ -87,7 +88,7 @@ else:
 # or use other designs for testing
 if False:
 
-    true_gene_class=['abcd']*835+\
+    true_gene_class=['abcd']*1835+\
         ['Abcd']*20+\
         ['aBcd']*20+\
         ['abCd']*20+\
@@ -253,32 +254,32 @@ for ng,gene in enumerate(genes):
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,None,'ABC','gaussian',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABC'],'abc','gaussian',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['abc'],'Abc','gaussian',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['Abc'],'ABc','gaussian',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABC','gaussian',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABC'],'abc','gaussian',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abc'],'Abc','gaussian',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abc'],'ABc','gaussian',min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,None,'ABCD','gaussian',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABCD'],'abcd','gaussian',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['abcd'],'Abcd','gaussian',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['Abcd'],'ABcd','gaussian',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,res['ABcd'],'ABCd','gaussian',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABCD','gaussian',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABCD'],'abcd','gaussian',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abcd'],'Abcd','gaussian',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abcd'],'ABcd','gaussian',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABcd'],'ABCd','gaussian',min_args)
         else:
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,None,'ABC','nbinom',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABC'],'abc','nbinom',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['abc'],'Abc','nbinom',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['Abc'],'ABc','nbinom',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABC','nbinom',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABC'],'abc','nbinom',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abc'],'Abc','nbinom',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abc'],'ABc','nbinom',min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,None,'ABCD','nbinom',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABCD'],'abcd','nbinom',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['abcd'],'Abcd','nbinom',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['Abcd'],'ABcd','nbinom',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,res['ABcd'],'ABCd','nbinom',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABCD','nbinom',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABCD'],'abcd','nbinom',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abcd'],'Abcd','nbinom',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abcd'],'ABcd','nbinom',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABcd'],'ABCd','nbinom',min_args)
 
         raise Exception('stop')
 
@@ -389,7 +390,8 @@ results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], \
                         model_selection=options.model_selection, \
                         constant_genes=np.intersect1d(constant_genes,TPM[take].index), \
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
-                        priors=true_priors if options.use_true_priors else None)
+                        priors=true_priors if options.use_true_priors else None, \
+                        prior_weight=options.prior_weight)
 
 output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes][take]
 

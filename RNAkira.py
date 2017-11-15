@@ -211,7 +211,7 @@ def get_rates (x, ntimes, model):
     
     return log_rates.T
         
-def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, prior_std, model, statsmodel, use_deriv):
+def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, prior_std, prior_weight, model, statsmodel, use_deriv):
 
     """ log-likelihood function for difference between expected and observed values, including all priors """
 
@@ -240,11 +240,11 @@ def steady_state_log_likelihood (x, vals, var, nf, T, time_points, prior_mu, pri
 
         # first add to log-likelihood the priors on rates at each time point (normal distribution with mu and std)
         diff=log_rates[i]-prior_mu
-        fun+=np.sum(-.5*(diff/prior_std)**2-.5*np.log(2.*np.pi)-np.log(prior_std))
+        fun+=prior_weight*np.sum(-.5*(diff/prior_std)**2-.5*np.log(2.*np.pi)-np.log(prior_std))
         
         if use_deriv:
             # add derivatives of rate parameters
-            grad[gg[t]]+=(-diff/prior_std**2)
+            grad[gg[t]]+=prior_weight*(-diff/prior_std**2)
             
         # get expected mean values (and their derivatives)
         if use_deriv:
@@ -299,7 +299,7 @@ def steady_state_residuals (x, vals, nf, T, time_points, model):
 
     return res
 
-def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel, min_args):
+def fit_model (vals, var, nf, T, time_points, priors, prior_weight, parent, model, statsmodel, min_args):
 
     """ fits a specific model to data given variance, normalization factors, labeling time, time points, priors, initial estimate from a parent model etc. """
 
@@ -319,7 +319,7 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
         initial_estimate=np.repeat(priors['mu'].values,ntimes)
 
     # arguments to minimization
-    args=(vals, var, nf, T, time_points, priors['mu'].values, priors['std'].values, model, statsmodel, min_args['jac'])
+    args=(vals, var, nf, T, time_points, priors['mu'].values, priors['std'].values, prior_weight,  model, statsmodel, min_args['jac'])
 
     # test gradient against numerical difference for debugging 
     if False:
@@ -370,7 +370,7 @@ def fit_model (vals, var, nf, T, time_points, priors, parent, model, statsmodel,
     return result
 
 def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, min_precursor=.1, min_ribo=1, \
-             models=None, constant_genes=None, maxlevel=None, priors=None, statsmodel='nbinom'):
+             models=None, constant_genes=None, maxlevel=None, priors=None, prior_weight=1, statsmodel='nbinom'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors and labeling time T,
         estimates empirical priors and fits models of increasing complexity """
@@ -489,7 +489,8 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             var_here=var.loc[gene][cols].values
             nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
 
-            result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], None, model, statsmodel, min_args)
+            result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())], \
+                              prior_weight, None, model, statsmodel, min_args)
 
             results[gene][level]=result
             all_results[gene][level]={model: result}
@@ -506,7 +507,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
         if new_priors.isnull().any().any():
             raise Exception("could not estimate finite model priors!")
 
-        prior_diff=((model_priors-new_priors)**2).sum().sum()/(new_priors**2).sum().sum()
+        prior_diff=((model_priors['mu']-new_priors['mu'])**2).sum().sum()/(new_priors['mu']**2).sum().sum()
 
         print >> sys.stderr, '   iter {0}: {1} fits, prior_diff: {2:.2g}'.format(niter,nfits,prior_diff)
 
@@ -559,8 +560,8 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
                     vals_here=vals.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
                     var_here=var.loc[gene][cols].values
                     nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((ntimes,nreps,len(cols)))
-                    result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, \
-                                      model_priors.loc[list(model.lower())], parent, model, statsmodel, min_args)
+                    result=fit_model (vals_here, var_here, nf_here, T[gene], time_points, model_priors.loc[list(model.lower())],\
+                                      prior_weight, parent, model, statsmodel, min_args)
 
                 model_results[gene]=result
                 level_results[gene][model]=result
@@ -997,6 +998,7 @@ if __name__ == '__main__':
     parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
     parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
     parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
+    parser.add_option('','--prior_weight',dest='prior_weight',help="prior weight in log likelihood [1]",default=1,type=float)
 
     # ignore warning about division by zero or over-/underflows
     np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
@@ -1159,6 +1161,7 @@ if __name__ == '__main__':
                         min_precursor=options.min_precursor, \
                         min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, \
+                        prior_weight=options.prior_weight, \
                         statsmodel=options.statsmodel)
     else:
         # now TPMs already include correction factors, so use NF=1
@@ -1169,6 +1172,7 @@ if __name__ == '__main__':
                         min_precursor=options.min_precursor, \
                         min_ribo=options.min_ribo,\
                         maxlevel=options.maxlevel, \
+                        prior_weight=options.prior_weight, \
                         statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
