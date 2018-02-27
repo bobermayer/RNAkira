@@ -106,12 +106,13 @@ if False:
         ['ABCD']*5
 
     #true_gene_class=['abcd']*50+['Abcd']*10+['aBcd']*10+['abCd']*10+['abcD']*10+['ABCD']*10
-    #true_gene_class=['abcd']*100
+    true_gene_class=['abcd']*100
+
     full_model='ABC'
     rate_types=['synthesis','degradation','processing']
     true_gene_class=['abc']*2000
 
-    true_gene_class=['abc']*905+\
+    true_gene_class=['abc']*1905+\
         ['Abc']*20+\
         ['aBc']*20+\
         ['abC']*20+\
@@ -122,19 +123,20 @@ if False:
 
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
-# define time points
-time_points=['0','20','40','60','80','100']
-ntimes=len(time_points)
+# define conditions
+#conditions=['0','20','40','60','80','100']
+conditions=['A','B']
+nconds=len(conditions)
 # define number of replicates
 nreps=options.nreps
 replicates=map(str,range(nreps))
-samples=list(itertools.product(time_points,replicates))
+samples=list(itertools.product(conditions,replicates))
 # labeling time
 T=1
 # parameters of dispersion curve (set intercept=1 and slope=0 for Poisson model, otherwise neg binomial)
 slope,intercept=0.01,2
 #slope,intercept=0,1
-# average fold change between time points
+# average fold change between conditions
 AVE_FC=2
 # arguments for minimization 
 min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
@@ -145,7 +147,8 @@ min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 
 
 nGenes=len(true_gene_class)
 genes=np.array(map(lambda x: '_'.join(x), zip(['gene']*nGenes,map(str,range(nGenes)),true_gene_class)))
-T=pd.Series(1,index=genes)
+#T=pd.DataFrame([[1,2]]*len(genes),index=genes,columns=conditions)
+T=pd.DataFrame(T,index=genes,columns=conditions)
 
 if options.no_length_library_bias:
     gene_stats=pd.DataFrame(dict(exon_length=1000,gene_type='protein_coding',exon_ucount=250),index=genes)
@@ -157,8 +160,8 @@ else:
 
 true_gene_class=pd.Series(true_gene_class,index=genes)
 
-print >> sys.stderr, '[test_RNAkira] drawing parameters for {0} genes ({1} time points, {2} replicates)'.format(nGenes,ntimes,nreps)
-print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.ix[:4].values.flatten())
+print >> sys.stderr, '[test_RNAkira] drawing parameters for {0} genes ({1} conditions, {2} replicates)'.format(nGenes,nconds,nreps)
+print >> sys.stderr, '[test_RNAkira] true priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}, log_d: {6:.2g}/{7:.2g}'.format(*true_priors.iloc[:4].values.flatten())
 
 parameters={}
 
@@ -166,15 +169,15 @@ for ng,gene in enumerate(genes):
 
     model=true_gene_class[gene]
     # first draw constant baselines for each parameter
-    pars=[scipy.stats.norm.rvs(true_priors.ix[mp,'mu'],true_priors.ix[mp,'std']) for mp in model.lower()]
+    pars=[scipy.stats.norm.rvs(true_priors.loc[mp,'mu'],true_priors.loc[mp,'std']) for mp in model.lower()]
     # give DE genes a bit more reads (make synthesis rate 1 log higher)
     if model!=model.lower():
         pars[0]+=1
-    # then expand this over time (add randomness of AVE_FC per time point for variable parameters)
-    parameters[gene]=np.array([p*np.ones(ntimes) if mp.islower() else \
-                               scipy.stats.norm.rvs(p,np.log(AVE_FC),size=ntimes) for mp,p in zip(model,pars)])
+    # then expand this over conditions (add randomness of AVE_FC per condition for variable parameters)
+    parameters[gene]=np.array([p*np.ones(nconds) if mp.islower() else \
+                               scipy.stats.norm.rvs(p,np.log(AVE_FC),size=nconds) for mp,p in zip(model,pars)])
 
-parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=time_points,\
+parameters=pd.DataFrame([pd.DataFrame(parameters[gene],columns=conditions,\
                                       index=rate_types).stack() for gene in genes],index=genes)
 
 counts={}
@@ -198,12 +201,12 @@ for ng,gene in enumerate(genes):
 
     # now get random values for observations according to these rate parameters
     pars=parameters.loc[gene]
-    cnts=pd.Series(index=pd.MultiIndex.from_product([cols,time_points,replicates]))
-    std=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
-    dsp=pd.Series(index=pd.MultiIndex.from_product([cols,time_points]))
+    cnts=pd.Series(index=pd.MultiIndex.from_product([cols,conditions,replicates]))
+    std=pd.Series(index=pd.MultiIndex.from_product([cols,conditions]))
+    dsp=pd.Series(index=pd.MultiIndex.from_product([cols,conditions]))
 
     # this is used to model U-pulldown bias
-    ubias=1.-.5*np.exp(-gene_stats.ix[gene,'exon_ucount']/500.)
+    ubias=1.-.5*np.exp(-gene_stats.loc[gene,'exon_ucount']/500.)
 
     model=true_gene_class[gene]
     cols_here=['elu-mature','flowthrough-mature','unlabeled-mature']
@@ -212,26 +215,26 @@ for ng,gene in enumerate(genes):
     if 'd' in model.lower():
         cols_here+=['ribo']
 
-    for t in time_points:
+    for cond in conditions:
 
         # get expected values given these rates
-        mu=RNAkira.get_steady_state_values(pars.xs(t,level=1),T[gene],model)
+        mu=RNAkira.get_steady_state_values(pars.xs(cond,level=1),T.loc[gene,cond],model)
         if options.no_length_library_bias:
             mu_eff=mu
         else:
             # multiply by gene length and library size factors and introduce U-bias 
-            mu_eff=mu*(gene_stats.ix[gene,'exon_length']/1.e3)*size_factor[cols_here]
+            mu_eff=mu*(gene_stats.loc[gene,'exon_length']/1.e3)*size_factor[cols_here]
             mu_eff[0]=mu_eff[0]*ubias
 
         # get counts based on these expected values
-        for m,c in zip(mu_eff,cols_here):
+        for m,col in zip(mu_eff,cols_here):
             d=(intercept-1)/m+slope
             if d < 1.e-8:
-                cnts[c,t]=scipy.stats.poisson.rvs(m,size=nreps)
+                cnts[col,cond]=scipy.stats.poisson.rvs(m,size=nreps)
             else:
-                cnts[c,t]=scipy.stats.nbinom.rvs(1./d,1./(1.+d*m),size=nreps)
-            std[c,t]=np.sqrt(m*(1.+d*m))
-            dsp[c,t]=d
+                cnts[col,cond]=scipy.stats.nbinom.rvs(1./d,1./(1.+d*m),size=nreps)
+            std[col,cond]=np.sqrt(m*(1.+d*m))
+            dsp[col,cond]=d
 
     counts[gene]=cnts
     stddev[gene]=std
@@ -240,46 +243,46 @@ for ng,gene in enumerate(genes):
     # use this to fit models directly and abort after one gene
     if options.do_direct_fits:
 
-        vals_here=cnts.unstack(level=0)[cols_here].stack().values.reshape((len(time_points),nreps,len(cols_here)))
+        vals_here=cnts.unstack(level=0)[cols_here].stack().values.reshape((len(conditions),nreps,len(cols_here)))
         std_here=std.mean(level=0)[cols_here].values
         disp_here=dsp.mean(level=0)[cols_here].values
         if options.no_length_library_bias:
             nf_here=np.ones_like(vals_here)
         else:
-            nf_here=1./(size_factor[cols_here].values*gene_stats.ix[gene,'exon_length']/1.e3)
+            nf_here=1./(size_factor[cols_here].values*gene_stats.loc[gene,'exon_length']/1.e3)
             nf_here[0]=nf_here[0]*ubias
-            nf_here=np.tile(nf_here,(ntimes,nreps)).reshape(vals_here.shape)
+            nf_here=np.tile(nf_here,(nconds,nreps)).reshape(vals_here.shape)
 
         if options.statsmodel=='gaussian':
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABC','gaussian',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABC'],'abc','gaussian',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abc'],'Abc','gaussian',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abc'],'ABc','gaussian',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','gaussian',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','gaussian',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','gaussian',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','gaussian',min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABCD','gaussian',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABCD'],'abcd','gaussian',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abcd'],'Abcd','gaussian',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abcd'],'ABcd','gaussian',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABcd'],'ABCd','gaussian',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','gaussian',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','gaussian',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','gaussian',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','gaussian',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','gaussian',min_args)
         else:
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABC','nbinom',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABC'],'abc','nbinom',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abc'],'Abc','nbinom',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abc'],'ABc','nbinom',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','nbinom',min_args)
+                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','nbinom',min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','nbinom',min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','nbinom',min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,None,'ABCD','nbinom',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABCD'],'abcd','nbinom',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['abcd'],'Abcd','nbinom',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['Abcd'],'ABcd','nbinom',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T[gene],time_points,priors,options.prior_weight,res['ABcd'],'ABCd','nbinom',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','nbinom',min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','nbinom',min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','nbinom',min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','nbinom',min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','nbinom',min_args)
 
         raise Exception('stop')
 
@@ -292,10 +295,10 @@ print >> sys.stderr, ''
 if options.model_selection=='empirical':
     # constant genes have no intronic or ribo coverage
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:400]
-    counts.ix[constant_genes,'ribo']=np.nan
-    counts.ix[constant_genes,'unlabeled-precursor']=np.nan
-    counts.ix[constant_genes,'elu-precursor']=np.nan
-    counts.ix[constant_genes,'flowthrough-precursor']=np.nan
+    counts.loc[constant_genes,'ribo']=np.nan
+    counts.loc[constant_genes,'unlabeled-precursor']=np.nan
+    counts.loc[constant_genes,'elu-precursor']=np.nan
+    counts.loc[constant_genes,'flowthrough-precursor']=np.nan
 else:
     constant_genes=None
 
@@ -320,7 +323,7 @@ if options.use_true_normalization:
 
     print >> sys.stderr, '[test_RNAkira] use true normalization factors'
     LF=gene_stats['exon_length']/1.e3
-    SF=pd.Series(size_factor.repeat(len(time_points)*nreps).values,index=counts.columns)
+    SF=pd.Series(size_factor.repeat(len(conditions)*nreps).values,index=counts.columns)
     UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
     if not options.no_length_library_bias:
         UF['elu-mature']=UF['elu-mature'].divide(1.-.5*np.exp(-gene_stats['exon_ucount']/500.),axis=0)
@@ -393,7 +396,7 @@ results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], \
                         priors=true_priors if options.use_true_priors else None, \
                         prior_weight=options.prior_weight)
 
-output=RNAkira.collect_results(results, time_points, select_best=(options.model_selection is not None)).loc[genes][take]
+output=RNAkira.collect_results(results, conditions, select_best=(options.model_selection is not None)).loc[genes][take]
 
 if options.save_results:
     print >> sys.stderr, '[test_RNAkira] saving results'
@@ -431,7 +434,7 @@ if options.model_selection is not None:
     ntarget=sum(tgc!='0')
 
     stats='{0} exact hits ({1:.1f}%)\n{2} over-classifications ({3:.1f}%)\n{4} under-classifications ({5:.1f}%)'.format(nexact,100*nexact/float(nGenes),nover,100*nover/float(nlim),nunder,100*nunder/float(ntarget))
-    title='{0} genes, {1} time points, {2} replicates, {3} model\n{4}'.format(nGenes,ntimes,nreps,options.statsmodel,stats)
+    title='{0} genes, {1} conditions, {2} replicates, {3} model\n{4}'.format(nGenes,nconds,nreps,options.statsmodel,stats)
     print >> sys.stderr, stats
 
     fig=plt.figure(figsize=(5,5.5))
@@ -463,12 +466,12 @@ if True: # compare fitted values directly to true rate parameters
 
     for n,r in enumerate(rate_types):
         if options.model_selection is None:
-            output_cols=['{0}_{1}_t{2}'.format(full_model,r,t) for t in time_points]
+            output_cols=['{0}_{1}_{2}'.format(full_model,r,cond) for cond in conditions]
         else:
-            output_cols=['initial_{0}_t{1}'.format(r,t) for t in time_points]
-        par_cols=['{0}_t{1}'.format(r,t) for t in time_points]
+            output_cols=['initial_{0}_{1}'.format(r,cond) for cond in conditions]
+        par_cols=['{0}_t{1}'.format(r,cond) for cond in conditions]
         ax=fig.add_subplot(2,2,n+1)
-        y,x=np.log(output[output_cols]).values.flatten(),parameters[par_cols].values.flatten()
+        y,x=output[output_cols].values.flatten(),parameters[par_cols].values.flatten()
         ok=np.isfinite(x) & np.isfinite(y)
         xr=np.percentile(x[ok],[1,99])
         yr=np.percentile(y[ok],[1,99])
@@ -484,7 +487,7 @@ if True: # compare fitted values directly to true rate parameters
         if n%2==0:
             ax.set_ylabel('log fitted value'.format(options.statsmodel))
 
-    fig.suptitle('{0} genes, {1} time points, {2} replicates, {3} model'.format(nGenes,ntimes,nreps,options.statsmodel),size=10)
+    fig.suptitle('{0} genes, {1} conditions, {2} replicates, {3} model'.format(nGenes,nconds,nreps,options.statsmodel),size=10)
 
     if options.save_figures:
         fig.savefig(options.out_prefix+'parameter_fits.pdf')
