@@ -21,6 +21,7 @@ parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",d
 parser.add_option('','--alpha',dest='alpha',help="model selection q-value cutoff [0.05]",default=0.05,type=float)
 parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
 parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
+parser.add_option('','--nconds',dest='nconds',help="number of conditions [6]",default=6,type=int)
 parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
 parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
 parser.add_option('','--no_length_library_bias',dest='no_length_library_bias',action='store_true',default=False)
@@ -124,9 +125,8 @@ if False:
 cols=['elu-mature','flowthrough-mature','unlabeled-mature','elu-precursor','flowthrough-precursor','unlabeled-precursor','ribo']
 
 # define conditions
-#conditions=['0','20','40','60','80','100']
-conditions=['A','B']
-nconds=len(conditions)
+nconds=options.nconds
+conditions=list('ABCDEFGHIKLMNOPQRST')[:nconds]
 # define number of replicates
 nreps=options.nreps
 replicates=map(str,range(nreps))
