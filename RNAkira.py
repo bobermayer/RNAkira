@@ -1168,12 +1168,15 @@ if __name__ == '__main__':
         T=map(float,options.T.split(','))
         if len(T)==1:
             T=pd.DataFrame(T[0],index=TPM.index,columns=conditions)
+            print >> sys.stderr, '[main] using single value for labeling time: {0}'.format(options.T)
         elif len(T)==len(conditions):
+            print >> sys.stderr, '[main] using list of values for labeling time: {0}'.format(options.T)
             T=pd.DataFrame([T]*len(TPM.index),index=TPM.index,columns=conditions)
         else:
             raise Exception("cannot parse labeling time {0}".format(options.T))
     except ValueError:
         T=pd.read_csv(options.T,index_col=0,header=None)[TPM.index]
+        print >> sys.stderr, '[main] using file with values for labeling time: {0}'.format(options.T)
         if T.shape[1]!=len(conditions):
             raise Exception("file for labeling time {0} does not have entries for each condition".format(options.T))
         nnull=T.isnull().any(axis=1).sum()

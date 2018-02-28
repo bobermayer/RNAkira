@@ -62,7 +62,7 @@ Additional options can be explored using ``python RNAkira.py -h``
 
 ## Output
 
-out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing rates and translational efficiency for each condition from the **initial fit**, together with error estimates, the log-likelihood of this model, it's R2 for the RNA and ribo fractions, fit success (boolean), and a p- and q-value from comparing to the best model; then rates for each condition for the **best model**, followed by the resulting log-likelihood, R2 values, the fit success, and finally p- and q-value from comparing the best to the next-best model
+out_prefix_results.csv -- a csv file with fit results for each gene: synthesis, degradation, processing rates and translational efficiency for each condition from the **initial fit** (on a log scale), together with error estimates, the log-likelihood of this model, it's R2 for the RNA and ribo fractions, fit success (boolean), and a p- and q-value from comparing to the best model; then (log) rates and errors for each condition for the **best model**, followed by the resulting log-likelihood, R2 values, the fit success, and finally p- and q-value from comparing the best to the next-best model
 
 optional outputs are:
 * out_prefix_TPM_correction.pdf -- a plot showing correction of 4sU incorporation bias and normalization of elu and flowthrough fractions for each sample
