@@ -478,7 +478,7 @@ if True: # compare fitted values directly to true rate parameters
         ax.hexbin(x[ok],y[ok],extent=(xr[0],xr[1],yr[0],yr[1]),bins='log',mincnt=1,vmin=-1)
         ax.plot(np.linspace(xr[0],xr[1],100),np.linspace(xr[0],xr[1],100),'r-',lw=.5)
         ax.set_title('{0}'.format(r),size=10)
-        good = np.sum(np.abs(np.log2(y/x)[ok]) < 2)
+        good = np.sum(np.abs(x-y)[ok] < np.log(2))
         ax.set_xlim(xr)
         ax.set_ylim(yr)
         ax.text(xr[0]+.05*(xr[1]-xr[0]),yr[1]-.05*(yr[1]-yr[0]),'{0:.0f}% within 2fold\nr={1:.2f}\nrho={2:.2f}\nn={3}'.format(100*good/float(ok.sum()),scipy.stats.pearsonr(x[ok],y[ok])[0],scipy.stats.spearmanr(x[ok],y[ok])[0],ok.sum()),size=6,va='top',ha='left')
