@@ -371,7 +371,7 @@ else:
                                      fig_name=options.out_prefix+'variability_stddev.pdf' if options.save_figures else None)
     else:
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
-        var=RNAkira.estimate_dispersion (counts.divide(nf_scaled,axis=1),\
+        var=RNAkira.estimate_dispersion (counts.multiply(nf_scaled,axis=1),\
                                          options.weight/float(nreps),\
                                          fig_name=options.out_prefix+'variability_disp.pdf' if options.save_figures else None)
 
@@ -408,13 +408,7 @@ if options.save_results:
 
 tgc=true_gene_class[take].apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
-if not options.no_length_library_bias:
-    # synthesis rate is measured in different units (TPM/h instead of counts)
-    parameters['synthesis']-=np.log(SF['unlabeled-mature'].mean())
-    if not options.no_ribo:
-        # translation efficiencies cannot measure global shift
-        parameters['translation']+=np.log(SF['unlabeled-mature'].mean())-np.log(SF['ribo'].mean())
-parameters.columns=[c[0]+'_t'+c[1] for c in parameters.columns.tolist()]
+parameters.columns=[c[0]+'_'+c[1] for c in parameters.columns.tolist()]
 parameters=parameters[take]
 genes=genes[take]
 nGenes=len(genes)
@@ -469,19 +463,20 @@ if True: # compare fitted values directly to true rate parameters
             output_cols=['{0}_{1}_{2}'.format(full_model,r,cond) for cond in conditions]
         else:
             output_cols=['initial_{0}_{1}'.format(r,cond) for cond in conditions]
-        par_cols=['{0}_t{1}'.format(r,cond) for cond in conditions]
+        par_cols=['{0}_{1}'.format(r,cond) for cond in conditions]
         ax=fig.add_subplot(2,2,n+1)
         y,x=output[output_cols].values.flatten(),parameters[par_cols].values.flatten()
         ok=np.isfinite(x) & np.isfinite(y)
+        intercept=np.mean(y[ok]-x[ok])
         xr=np.percentile(x[ok],[1,99])
         yr=np.percentile(y[ok],[1,99])
         ax.hexbin(x[ok],y[ok],extent=(xr[0],xr[1],yr[0],yr[1]),bins='log',mincnt=1,vmin=-1)
-        ax.plot(np.linspace(xr[0],xr[1],100),np.linspace(xr[0],xr[1],100),'r-',lw=.5)
+        ax.plot(np.linspace(xr[0],xr[1],100),intercept+np.linspace(xr[0],xr[1],100),'r-',lw=.5)
         ax.set_title('{0}'.format(r),size=10)
-        good = np.sum(np.abs(x-y)[ok] < np.log(2))
+        good = np.sum(np.abs(x-y+intercept)[ok] < np.log(1.5))
         ax.set_xlim(xr)
         ax.set_ylim(yr)
-        ax.text(xr[0]+.05*(xr[1]-xr[0]),yr[1]-.05*(yr[1]-yr[0]),'{0:.0f}% within 2fold\nr={1:.2f}\nrho={2:.2f}\nn={3}'.format(100*good/float(ok.sum()),scipy.stats.pearsonr(x[ok],y[ok])[0],scipy.stats.spearmanr(x[ok],y[ok])[0],ok.sum()),size=6,va='top',ha='left')
+        ax.text(xr[0]+.05*(xr[1]-xr[0]),yr[1]-.05*(yr[1]-yr[0]),'{0:.0f}% within 1.5fold\nr={1:.2f}\nrho={2:.2f}\nn={3}'.format(100*good/float(ok.sum()),scipy.stats.pearsonr(x[ok],y[ok])[0],scipy.stats.spearmanr(x[ok],y[ok])[0],ok.sum()),size=6,va='top',ha='left')
         if n > 1:
             ax.set_xlabel('log true value')
         if n%2==0:

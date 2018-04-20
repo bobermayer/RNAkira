@@ -719,9 +719,10 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
         FT_ratio=(TPM['flowthrough-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
-        #slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
-        slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1],\
-                                       we=elu_ratio[ok].std(),wd=FT_ratio[ok].std())
+        slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
+
+        #slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1],\
+        #                               we=elu_ratio[ok].std(),wd=FT_ratio[ok].std())
 
         if intercept <= 0 or slope >= 0:
             raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
@@ -1150,7 +1151,7 @@ if __name__ == '__main__':
     if options.statsmodel=='nbinom':
         # estimate dispersion based on library-size-normalized counts but keep scales (divide by geometric mean per assay)
         nf_scaled=NF.divide(np.exp(np.log(NF).mean(axis=1,level=0)),axis=0,level=0)
-        variability=estimate_dispersion (counts.divide(nf_scaled,axis=1), options.weight/float(nreps), \
+        variability=estimate_dispersion (counts.multiply(nf_scaled,axis=1), options.weight/float(nreps), \
                                          fig_name=(None if options.no_plots else options.out_prefix+'variability.pdf'))
     else:
         variability=estimate_stddev (TPM, options.weight/float(nreps), \
