@@ -873,24 +873,29 @@ def estimate_dispersion (counts, weight, fig_name=None):
 
     print >> sys.stderr, '[estimate_dispersion] fitting dispersion trend'
 
+    # mean counts: averaged first within conditions, then between conditions
     mean_counts=counts.mean(axis=1,level=[0,1]).mean(axis=1,level=0)
-    var_counts=counts.var(axis=1,level=[0,1]).mean(axis=1,level=0)
-    # get dispersion trend: theta = alpha/mu + beta, fit in log space
-    log_disp_act=np.log((var_counts-mean_counts)/mean_counts**2).replace([np.inf,-np.inf],np.nan)
+    # within-condition variances
+    var_counts=counts.var(axis=1,level=[0,1])
+    # bare dispersions: geometric average between condition of within-condition variances and mean counts
+    log_disp_act=np.log(var_counts.sub(mean_counts,axis=0,level=0).divide(mean_counts**2,axis=0,level=0)).replace([np.inf,-np.inf],np.nan).mean(axis=1,level=0)
     log_mean=np.log(mean_counts).replace([np.inf,-np.inf],np.nan)
+
     bounds=np.concatenate([np.nanpercentile(log_mean,[1,99]),
                            np.nanpercentile(log_disp_act,[1,99])])
     if not np.all(np.isfinite(bounds)):
         raise Exception("bounds not finite")
+
     ok=(log_mean.values > bounds[0]) &\
         (log_mean.values < bounds[1]) &\
         (log_disp_act.values > bounds[2]) &\
         (log_disp_act.values < bounds[3])
+    # get dispersion trend: theta = alpha/mu + beta, fit in log space
     theo_disp = lambda p, x, y: np.log(p[0]/np.exp(x)+p[1])-y
     (alpha,beta),success=scipy.optimize.leastsq(theo_disp, [1,.02], args=(log_mean.values[ok],log_disp_act.values[ok]))
     if alpha < 0 or beta < 0 or success==0:
         raise Exception("invalid parameters in estimate_dispersion")
-    log_disp_smooth=np.log(alpha/mean_counts+beta).replace([np.inf,-np.inf],np.nan)
+    log_disp_smooth=np.log(alpha/np.exp(log_mean)+beta).replace([np.inf,-np.inf],np.nan)
     # estimated dispersion is weighted geometric average of actual dispersion and smoothened trend
     log_disp=(1.-weight)*log_disp_act + weight*log_disp_smooth
     # replace NaN values by smooth estimate
