@@ -9,7 +9,6 @@ import scipy.interpolate
 import scipy.odr
 import scipy.optimize
 import statsmodels.nonparametric.smoothers_lowess
-import statsmodels.regression.linear_model
 from optparse import OptionParser
 from collections import defaultdict,OrderedDict,Counter
 
@@ -935,11 +934,12 @@ def estimate_stddev (TPM, weight, fig_name=None):
 
     print >> sys.stderr, '[estimate_stddev] fitting stddev trend'
 
-    # do stddev over all samples
-    log_std=np.log(TPM.std(axis=1,level=[0,1]).mean(axis=1,level=0)).replace([np.inf,-np.inf],np.nan)
+    # do stddev within-condition 
+    log_std=np.log(TPM.std(axis=1,level=[0,1])).replace([np.inf,-np.inf],np.nan)
+
     # perform lowess regression on log CV vs log mean
     log_means=np.log(TPM.mean(axis=1,level=[0,1]).mean(axis=1,level=0))
-    log_CV=log_std-log_means
+    log_CV=log_std.sub(log_means,axis=0,level=0).mean(axis=1,level=0)
     ok=np.isfinite(log_means.values) & np.isfinite(log_CV.values)
     log_mean_range=np.abs(log_means.values[ok].max()-log_means.values[ok].min())
     lowess=statsmodels.nonparametric.smoothers_lowess.lowess(log_CV.values[ok],log_means.values[ok],\
@@ -947,7 +947,7 @@ def estimate_stddev (TPM, weight, fig_name=None):
     interp=scipy.interpolate.interp1d(lowess[0],lowess[1],bounds_error=False)
     log_std_smooth=(interp(log_means)+log_means).replace([np.inf,-np.inf],np.nan)
     # estimated stddev is weighted average of actual stddev and smoothened trend
-    log_std_est=(1.-weight)*log_std+weight*log_std_smooth
+    log_std_est=(1.-weight)*(log_CV+log_means)+weight*log_std_smooth
     # replace NaN values by smooth estimate
     take=log_std_est.isnull()
     log_std_est[take]=log_std_smooth[take]
