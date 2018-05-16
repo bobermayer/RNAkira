@@ -993,7 +993,7 @@ if __name__ == '__main__':
 
     parser=OptionParser()
     parser.add_option('-g','--gene_stats',dest='gene_stats',help="gene stats file (created by prepare_annotation.py)")
-    parser.add_option('-i','--input_TPM',dest='input_TPM',help='csv file with corrected TPM values')
+    parser.add_option('-i','--input_TPM',dest='input_TPM',help='csv file with TPM values')
     parser.add_option('-e','--elu_introns',dest='elu_introns',help="featureCounts output for eluate RNA mapped to introns")
     parser.add_option('-E','--elu_exons',dest='elu_exons',help="featureCounts output for eluate RNA mapped to exons")
     parser.add_option('-f','--flowthrough_introns',dest='flowthrough_introns',help="featureCounts output for flowthrough RNA mapped to introns")
@@ -1045,6 +1045,7 @@ if __name__ == '__main__':
         print >> sys.stderr, '\n[main] reading TPM values from '+options.input_TPM
         print >> sys.stderr, '       ignoring options -eEfFruU'
         TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
+	counts=TPM
 
         # neg binom doesn't work here
         options.statsmodel='gaussian'
@@ -1184,27 +1185,15 @@ if __name__ == '__main__':
             raise Exception("{0} genes have no labeling time in {1}".format(nnull,options.T))
 
     print >> sys.stderr, '\n[main] running RNAkira'
-    if options.input_TPM is None:
-        results=RNAkira(counts[take], variability[take], NF[take], T[take], \
-                        alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
-                        model_selection=options.model_selection, \
-                        constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
-                        min_precursor=options.min_precursor, \
-                        min_ribo=options.min_ribo,\
-                        maxlevel=options.maxlevel, \
-                        prior_weight=options.prior_weight, \
-                        statsmodel=options.statsmodel)
-    else:
-        # now TPMs already include correction factors, so use NF=1
-        results=RNAkira(TPM[take], variability[take], pd.DataFrame(1.0,index=NF.index,columns=NF.columns)[take], T[take], \
-                        alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
-                        model_selection=options.model_selection, \
-                        constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
-                        min_precursor=options.min_precursor, \
-                        min_ribo=options.min_ribo,\
-                        maxlevel=options.maxlevel, \
-                        prior_weight=options.prior_weight, \
-                        statsmodel=options.statsmodel)
+    results=RNAkira(counts[take], variability[take], NF[take], T[take], \
+                    alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
+                    model_selection=options.model_selection, \
+                    constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                    min_precursor=options.min_precursor, \
+                    min_ribo=options.min_ribo,\
+                    maxlevel=options.maxlevel, \
+                    prior_weight=options.prior_weight, \
+                    statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
     output=collect_results(results, conditions, select_best=(options.model_selection is not None))
