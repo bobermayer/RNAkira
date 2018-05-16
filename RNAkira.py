@@ -1045,7 +1045,7 @@ if __name__ == '__main__':
         print >> sys.stderr, '\n[main] reading TPM values from '+options.input_TPM
         print >> sys.stderr, '       ignoring options -eEfFruU'
         TPM=pd.read_csv(options.input_TPM,index_col=0,header=range(3))
-	counts=TPM
+        counts=TPM
 
         # neg binom doesn't work here
         options.statsmodel='gaussian'
