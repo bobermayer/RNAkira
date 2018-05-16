@@ -351,8 +351,7 @@ def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model
                 est_errs=pd.DataFrame(rate_errs,columns=list(model.lower()),index=conditions),\
                 logL=-res.fun,\
                 R2_tot=1-SSres.sum()/np.sum((vals*nf-np.mean(vals*nf))**2),\
-                R2_RNA=(1-SSres/SStot)[iRNA],\
-                R2_ribo=(1-SSres/SStot)[iribo] if 'd' in model.lower() else np.nan,\
+                R2_frac=(1-SSres/SStot),
                 AIC=2*(len(res.x)+1+res.fun),\
                 success=res.success,\
                 significant=False,\
@@ -632,8 +631,7 @@ def collect_results (results, conditions, select_best=False):
                 [('initial_translation_err_{0}'.format(cond),errs.loc[cond,'d'] if 'd' in pars.columns else np.nan) for cond in conditions]+\
                 [('initial_logL',initial_fit['logL']),\
                  ('initial_R2_tot',initial_fit['R2_tot']),\
-                 ('initial_R2_RNA',initial_fit['R2_RNA']),\
-                 ('initial_R2_ribo',initial_fit['R2_ribo']),\
+                 ('initial_R2_frac',';'.join(map(str,np.round(initial_fit['R2_frac'],3)))),\
                  ('initial_fit_success',initial_fit['success']),\
                  ('initial_AIC',initial_fit['AIC']),\
                  ('initial_pval',initial_fit['LRT-p'] if 'LRT-p' in initial_fit else np.nan),\
@@ -654,8 +652,7 @@ def collect_results (results, conditions, select_best=False):
                 [('modeled_translation_err_{0}'.format(cond),errs.loc[cond,'d'] if 'd' in pars.columns else np.nan) for cond in conditions]+\
                 [('modeled_logL',best_fit['logL']),\
                  ('modeled_R2_tot',best_fit['R2_tot']),\
-                 ('modeled_R2_RNA',best_fit['R2_RNA']),\
-                 ('modeled_R2_ribo',best_fit['R2_ribo']),\
+                 ('modeled_R2_frac',';'.join(map(str,np.round(best_fit['R2_frac'],3)))),\
                  ('modeled_fit_success',best_fit['success']),\
                  ('modeled_AIC',best_fit['AIC']),\
                  ('modeled_pval',best_fit['LRT-p'] if 'LRT-p' in best_fit else np.nan),\
@@ -680,8 +677,7 @@ def collect_results (results, conditions, select_best=False):
                 [(model+'_translation_err_{0}'.format(cond),errs.loc[cond,'d'] if 'd' in pars.columns else np.nan) for cond in conditions]+\
                 [(model+'_logL',r['logL']),\
                  (model+'_R2_tot',r['R2_tot']),\
-                 (model+'_R2_RNA',r['R2_RNA']),\
-                 (model+'_R2_ribo',r['R2_ribo']),\
+                 (model+'_R2_frac',';'.join(map(str,np.round(r['R2_frac'],3)))),\
                  (model+'_fit_success',r['success']),\
                  (model+'_AIC',r['AIC']),\
                  (model+'_pval',r['LRT-p'] if 'LRT-p' in r else np.nan),\
