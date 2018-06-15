@@ -1020,6 +1020,7 @@ if __name__ == '__main__':
     parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
     parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
     parser.add_option('','--prior_weight',dest='prior_weight',help="prior weight in log likelihood [1]",default=1,type=float)
+    parser.add_option('','--balance_normalization_factors',dest='balance_normalization_factors',action='store_true',default=False,help="""balance normalization factors across samples [no]""")
 
     # ignore warning about division by zero or over-/underflows
     np.seterr(divide='ignore',over='ignore',under='ignore',invalid='ignore')
@@ -1144,6 +1145,17 @@ if __name__ == '__main__':
     # normalization factor combines size factors with TPM correction 
     NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
     TPM=counts.multiply(NF)
+
+    if options.balance_normalization_factors:
+        print >> sys.stderr, '[main] balancing correction factors over samples'
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+            (TPM.multiply(UF)[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
+        elu_ratios=TPM.loc[reliable_genes,'elu-mature'].sum(axis=0)/TPM.loc[reliable_genes,'unlabeled-mature'].sum(axis=0)
+        CF['elu-mature']=CF['elu-mature'].divide(elu_ratios/elu_ratios.mean())
+        CF['elu-precursor']=CF['elu-precursor'].divide(elu_ratios/elu_ratios.mean())
+        NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
+        TPM=counts.multiply(NF)
+
     if options.save_normalization_factors:
         print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'normalization_factors.csv'
         UF.multiply(CF).divide(SF,axis=1).fillna(1).to_csv(options.out_prefix+'normalization_factors.csv',\
