@@ -744,7 +744,9 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_fa
                 ax.set_ylabel('FT/unlabeled')
 
     if balance_normalization_factors:
+
         print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] balancing correction factors over samples'
+
         totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
         elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']
         flowthrough_ratios=totTPM['flowthrough-mature']/totTPM['unlabeled-mature']
