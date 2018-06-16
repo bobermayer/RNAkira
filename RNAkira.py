@@ -687,7 +687,7 @@ def collect_results (results, conditions, select_best=False):
 
     return pd.DataFrame.from_dict(output,orient='index')
 
-def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
+def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_factors=False, fig_name=None):
 
     """ fixes library size normalization of TPM values for each sample separately """
 
@@ -743,6 +743,22 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, fig_name=None):
             if n%M==0:
                 ax.set_ylabel('FT/unlabeled')
 
+    if balance_normalization_factors:
+        print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] balancing correction factors over samples'
+        totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
+        elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']
+        flowthrough_ratios=totTPM['flowthrough-mature']/totTPM['unlabeled-mature']
+
+        slope,intercept=odr_regression(elu_ratios, flowthrough_ratios)
+
+        if slope > 0 or intercept < 0:
+            raise Exception('invalid slope ({0:.2f}) or intercept ({1:.2f}) in normalize_elu_flowthrough_over_genes!'.format(slope,intercept))
+
+        CF['elu-mature']=-slope*CF['elu-mature']/intercept
+        CF['elu-precursor']=-slope*CF['elu-precursor']/intercept
+        CF['flowthrough-mature']=CF['flowthrough-mature']/intercept
+        CF['flowthrough-precursor']=CF['flowthrough-precursor']/intercept
+
     if fig_name is not None:
         print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
@@ -760,7 +776,6 @@ def normalize_elu_flowthrough_over_samples (TPM, constant_genes, fig_name=None):
         fig=plt.figure(figsize=(4,3))
 
     print >> sys.stderr, '[normalize_elu_flowthrough_over_samples] normalizing using constant genes'
-
 
     CF=pd.Series(1.0,index=TPM.columns)
     # normalize TPMs to those of constant genes
@@ -1140,21 +1155,12 @@ if __name__ == '__main__':
                                                    fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
     else:
         CF=normalize_elu_flowthrough_over_genes (TPM.multiply(UF), samples,\
+                                                 balance_normalization_factors=options.balance_normalization_factors,\
                                                  fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
 
     # normalization factor combines size factors with TPM correction 
     NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
     TPM=counts.multiply(NF)
-
-    if options.balance_normalization_factors:
-        print >> sys.stderr, '[main] balancing correction factors over samples'
-        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
-            (TPM.multiply(UF)[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
-        elu_ratios=TPM.loc[reliable_genes,'elu-mature'].sum(axis=0)/TPM.loc[reliable_genes,'unlabeled-mature'].sum(axis=0)
-        CF['elu-mature']=CF['elu-mature'].divide(elu_ratios/elu_ratios.mean())
-        CF['elu-precursor']=CF['elu-precursor'].divide(elu_ratios/elu_ratios.mean())
-        NF=UF.multiply(CF).divide(LF,axis=0,level=0,fill_value=1).divide(SF,axis=1).fillna(1)
-        TPM=counts.multiply(NF)
 
     if options.save_normalization_factors:
         print >> sys.stderr, '[main] saving normalization factors to '+options.out_prefix+'normalization_factors.csv'
