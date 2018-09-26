@@ -1068,6 +1068,7 @@ if __name__ == '__main__':
 
         if options.flowthrough_exons is not None:
             print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
+            use_flowthrough=True
             flowthrough_exons,flowthrough_exon_length=read_featureCounts_output(options.flowthrough_exons,samples)
         else:
             use_flowthrough=False
