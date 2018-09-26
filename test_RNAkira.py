@@ -23,9 +23,11 @@ parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC 
 parser.add_option('','--nreps',dest='nreps',help="number of replicates [5]",default=5,type=int)
 parser.add_option('','--nconds',dest='nconds',help="number of conditions [6]",default=6,type=int)
 parser.add_option('','--weight',dest='weight',help="weight for variability estimation [1]",default=1,type=float)
-parser.add_option('','--model_selection',dest='model_selection',help="use model selection (LRT or empirical)")
+parser.add_option('','--no_model_selection',dest='no_model_selection',action='store_true',default=False,help="no model selection [False]")
+parser.add_option('','--normalize_with_constant_genes',dest='normalize_with_constant_genes',action='store_true',help="normalize using constant genes")
 parser.add_option('','--no_length_library_bias',dest='no_length_library_bias',action='store_true',default=False)
 parser.add_option('','--no_ribo',dest='no_ribo',action='store_true',default=False)
+parser.add_option('','--no_flowthrough',dest='no_flowthrough',action='store_true',default=False)
 parser.add_option('','--use_true_variability',dest='use_true_variability',action='store_true',default=False)
 parser.add_option('','--use_true_normalization',dest='use_true_normalization',action='store_true',default=False)
 parser.add_option('','--use_true_priors',dest='use_true_priors',action='store_true',default=False)
@@ -55,6 +57,7 @@ rate_types=['synthesis','degradation','processing','translation']
 
 # distribute models over genes
 if options.no_ribo:
+
     full_model='ABC'
     rate_types=['synthesis','degradation','processing']
 
@@ -290,15 +293,20 @@ counts=pd.DataFrame.from_dict(counts,orient='index').loc[genes]
 disp=pd.DataFrame.from_dict(disp,orient='index').loc[genes]
 stddev=pd.DataFrame.from_dict(stddev,orient='index').loc[genes]
 
-print >> sys.stderr, ''
+if options.no_flowthrough:
+    print >> sys.stderr, '[test_RNAkira] setting flowthrough counts to 0'
+    counts['flowthrough-mature']=0
+    counts['flowthrough-precursor']=0
+    if not options.normalize_with_constant_genes:
+        raise Exception("if simulating without flowthrough, constant genes must be used for normalization")
 
-if options.model_selection=='empirical':
-    # constant genes have no intronic or ribo coverage
+if options.normalize_with_constant_genes:
+    # define constant genes, no intronic or ribo coverage
     constant_genes=true_gene_class.index[(true_gene_class=='abcd')][:400]
-    counts.loc[constant_genes,'ribo']=np.nan
-    counts.loc[constant_genes,'unlabeled-precursor']=np.nan
-    counts.loc[constant_genes,'elu-precursor']=np.nan
-    counts.loc[constant_genes,'flowthrough-precursor']=np.nan
+    counts.loc[constant_genes,'ribo']=0
+    counts.loc[constant_genes,'unlabeled-precursor']=0
+    counts.loc[constant_genes,'elu-precursor']=0
+    counts.loc[constant_genes,'flowthrough-precursor']=0
 else:
     constant_genes=None
 
@@ -314,6 +322,8 @@ if options.save_input:
         tmp=counts[col].fillna(0).astype(int)
         tmp.columns=['.'.join(c) for c in tmp.columns.tolist()]
         pd.concat([dummy,gene_stats['exon_length'],tmp],axis=1).to_csv(options.out_prefix+col+'.tsv',sep='\t')
+
+print >> sys.stderr, ''
 
 ########################################################################
 #### normalization, U-bias correction                               ####
@@ -348,7 +358,11 @@ else:
         UF=pd.DataFrame(1,index=counts.index,columns=counts.columns)
     else:
         UF=RNAkira.correct_ubias(TPM,samples,gene_stats,fig_name=options.out_prefix+'ubias_correction.pdf' if options.save_figures else None)
-    CF=RNAkira.normalize_elu_flowthrough_over_genes(TPM.multiply(UF),samples,fig_name=options.out_prefix+'TPM_correction.pdf' if options.save_figures else None)
+        
+    if options.normalize_with_constant_genes:
+        CF=RNAkira.normalize_elu(TPM.multiply(UF),constant_genes)
+    else:
+        CF=RNAkira.normalize_elu_flowthrough(TPM.multiply(UF),samples,fig_name=options.out_prefix+'TPM_correction.pdf' if options.save_figures else None)
 
     NF=UF.multiply(CF).divide(LF,axis=0).divide(SF,axis=1).fillna(1)
 
@@ -385,18 +399,21 @@ print >> sys.stderr, ''
 #### RNAkira results                                                ####
 ########################################################################
 
-take=(TPM['unlabeled-mature'] > 1).any(axis=1) & \
-    ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
+take=(TPM['unlabeled-mature'] > 1).any(axis=1) & ~np.isin(TPM.index,constant_genes)
+if options.no_flowthrough:
+    take=take & ~var[['unlabeled-mature','elu-mature']].isnull().any(axis=1)
+else:
+    take=take & ~var[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
 
 results=RNAkira.RNAkira(counts[take], var[take], NF[take], T[take], \
                         alpha=options.alpha, LFC_cutoff=options.LFC_cutoff, \
-                        model_selection=options.model_selection, \
-                        constant_genes=np.intersect1d(constant_genes,TPM[take].index), \
+                        no_model_selection=options.no_model_selection, \
+                        use_flowthrough=not options.no_flowthrough,\
                         maxlevel=options.maxlevel, statsmodel=options.statsmodel, \
                         priors=true_priors if options.use_true_priors else None, \
                         prior_weight=options.prior_weight)
 
-output=RNAkira.collect_results(results, conditions, select_best=(options.model_selection is not None)).loc[genes][take]
+output=RNAkira.collect_results(results, conditions, select_best=not options.no_model_selection).loc[genes][take]
 
 if options.save_results:
     print >> sys.stderr, '[test_RNAkira] saving results'
@@ -413,7 +430,7 @@ parameters=parameters[take]
 genes=genes[take]
 nGenes=len(genes)
 
-if options.model_selection is not None:
+if not options.no_model_selection:
 
     igc=output['best_model'].apply(lambda x: '0' if x.islower() else ''.join(m for m in x if m.isupper()))
 
@@ -459,7 +476,7 @@ if True: # compare fitted values directly to true rate parameters
     fig.subplots_adjust(hspace=.4,wspace=.4)
 
     for n,r in enumerate(rate_types):
-        if options.model_selection is None:
+        if options.no_model_selection:
             output_cols=['{0}_{1}_{2}'.format(full_model,r,cond) for cond in conditions]
         else:
             output_cols=['initial_{0}_{1}'.format(r,cond) for cond in conditions]
@@ -487,7 +504,7 @@ if True: # compare fitted values directly to true rate parameters
     if options.save_figures:
         fig.savefig(options.out_prefix+'parameter_fits.pdf')
 
-if options.model_selection is None:
+if options.no_model_selection:
 
     output.columns=pd.MultiIndex.from_tuples([(c.split('_')[0],'_'.join(c.split('_')[1:])) for c in output.columns])
     if options.no_ribo:

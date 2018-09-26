@@ -78,7 +78,7 @@ def get_model_definitions(nlevels,take_all=True):
 
     return models
 
-def get_steady_state_values (x, T, model, use_deriv=False):
+def get_steady_state_values (x, T, model, use_flowthrough=True, use_deriv=False):
 
     """ given synthesis, degradation, processing rates and translation efficiencies x=(a,b,c,d) and labeling time T
     returns instantaneous steady-state values for elu, flowthrough, unlabeled mature including precursors and ribo depending on model
@@ -95,14 +95,16 @@ def get_steady_state_values (x, T, model, use_deriv=False):
             a,b,c=np.exp(x)
 
         # for elu-mature, flowthrough-mature, unlabeled-mature
-        exp_mean_mature=[a*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T)))/(b*(b-c)),\
-                         a*(b*np.exp(-c*T)-c*np.exp(-b*T))/(b*(b-c)),\
-                         a/b]
+        exp_mean_mature=[a*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T)))/(b*(b-c))]
+        if use_flowthrough:
+            exp_mean_mature+=[a*(b*np.exp(-c*T)-c*np.exp(-b*T))/(b*(b-c))]
+        exp_mean_mature+=[a/b]
 
         # add elu-precursor, flowthrough-precursor, unlabeled-precursor
-        exp_mean_precursor=[a*(1.-np.exp(-c*T))/c,\
-                            a*np.exp(-c*T)/c,\
-                            a/c]
+        exp_mean_precursor=[a*(1.-np.exp(-c*T))/c]
+        if use_flowthrough:
+            exp_mean_precursor+=[a*np.exp(-c*T)/c]
+        exp_mean_precursor+=[a/c]
 
         exp_mean=exp_mean_mature+exp_mean_precursor
 
@@ -114,9 +116,10 @@ def get_steady_state_values (x, T, model, use_deriv=False):
             a,b=np.exp(x)
 
         # for elu-mature, flowthrough-mature, unlabeled-mature
-        exp_mean_mature=[a*(1.-np.exp(-b*T))/b,\
-                         a*np.exp(-b*T)/b,\
-                         a/b]
+        exp_mean_mature=[a*(1.-np.exp(-b*T))/b]
+        if use_flowthrough:
+            exp_mean_mature+=[a*np.exp(-b*T)/b]
+        exp_mean_mature+=[a/b]
 
         exp_mean=exp_mean_mature[:]
 
@@ -134,32 +137,39 @@ def get_steady_state_values (x, T, model, use_deriv=False):
 
             # get the derivatives of mature vals w.r.t. log(b)
             exp_mean_mature_deriv_log_b=[a*(b*(b-c)*(1.-np.exp(-c*T)-c*T*np.exp(-b*T))-\
-                                            (2*b-c)*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2),\
-                                         a*(b*(b-c)*(T*c*np.exp(-b*T)+np.exp(-c*T))-(2*b-c)*(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2),\
-                                         -a/b]
+                                            (2*b-c)*(b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2)]
+            if use_flowthrough:
+                exp_mean_mature_deriv_log_b+=[a*(b*(b-c)*(T*c*np.exp(-b*T)+np.exp(-c*T))-(2*b-c)*(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2)]
+            exp_mean_mature_deriv_log_b+=[-a/b]
 
             # get deriv of mature w.r.t. log(c)
             exp_mean_mature_deriv_log_c=[a*c*((b-c)*(b*T*np.exp(-c*T)-1.+np.exp(-b*T))+\
-                                              (b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2),\
-                                         a*c*((b-c)*(-np.exp(-b*T)-T*b*np.exp(-c*T))+(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2),\
-                                         0]
+                                              (b*(1.-np.exp(-c*T))-c*(1.-np.exp(-b*T))))/(b*(b-c)**2)]
+            if use_flowthrough:
+                exp_mean_mature_deriv_log_c+=[a*c*((b-c)*(-np.exp(-b*T)-T*b*np.exp(-c*T))+(b*np.exp(-c*T)-c*np.exp(-b*T)))/(b*(b-c)**2)]
+            exp_mean_mature_deriv_log_c+=[0]
 
             exp_mean_mature_deriv=[exp_mean_mature_deriv_log_a,\
                                    exp_mean_mature_deriv_log_b,\
                                    exp_mean_mature_deriv_log_c]
 
             # then get derivatives of precursor w.r.t. log(a),log(b),log(c)
-            exp_mean_precursor_deriv=[exp_mean_precursor[:],\
-                                      [0,0,0],\
-                                      [a*(np.exp(-c*T)*(1.+c*T)-1)/c,\
-                                       -a*np.exp(-c*T)*(1.+c*T)/c,\
-                                       -a/c]]
+            exp_mean_precursor_deriv=[exp_mean_precursor[:]]
+            if use_flowthrough:
+                exp_mean_precursor_deriv+=[[0,0,0],\
+                                           [a*(np.exp(-c*T)*(1.+c*T)-1)/c,\
+                                            -a*np.exp(-c*T)*(1.+c*T)/c,\
+                                            -a/c]]
+            else:
+                exp_mean_precursor_deriv+=[[0,0],\
+                                           [a*(np.exp(-c*T)*(1.+c*T)-1)/c,\
+                                            -a/c]]
 
             exp_mean_deriv=[exp_mean_mature_deriv[i]+exp_mean_precursor_deriv[i] for i in range(3)]
 
             if use_ribo:
                 # add derivatives w.r.t. log(d)
-                exp_mean_deriv_log_d=[[0,0,0,0,0,0]]
+                exp_mean_deriv_log_d=[[0]*(4+2*use_flowthrough)]
                 exp_mean_deriv+=exp_mean_deriv_log_d
                 # add derivatives of ribo values w.r.t. log(a),log(b),log(c),log(d)
                 exp_mean_ribo_deriv=[[d*a/b],[-d*a/b],[0],[d*a/b]]
@@ -168,16 +178,17 @@ def get_steady_state_values (x, T, model, use_deriv=False):
         else:
 
             # get the derivatives of mature vals w.r.t. log(b)
-            exp_mean_mature_deriv_log_b=[a*(np.exp(-b*T)*(1.+b*T)-1)/b,\
-                                         -a*np.exp(-b*T)*(1.+b*T)/b,\
-                                         -a/b]
+            exp_mean_mature_deriv_log_b=[a*(np.exp(-b*T)*(1.+b*T)-1)/b]
+            if use_flowthrough:
+                exp_mean_mature_deriv_log_b+=[-a*np.exp(-b*T)*(1.+b*T)/b]
+            exp_mean_mature_deriv_log_b+=[-a/b]
         
             exp_mean_deriv=[exp_mean_mature_deriv_log_a,\
                             exp_mean_mature_deriv_log_b]
 
             if use_ribo:
                 # add derivatives w.r.t. log(d)
-                exp_mean_mature_deriv_log_d=[0,0,0]
+                exp_mean_mature_deriv_log_d=[0]*(2+use_flowthrough)
                 exp_mean_deriv=[exp_mean_mature_deriv_log_a,\
                                 exp_mean_mature_deriv_log_b,
                                 exp_mean_mature_deriv_log_d]
@@ -210,7 +221,7 @@ def get_rates (x, nconds, model):
     
     return log_rates.T
         
-def steady_state_log_likelihood (x, vals, var, nf, T, conditions, prior_mu, prior_std, prior_weight, model, statsmodel, use_deriv):
+def steady_state_log_likelihood (x, vals, var, nf, T, conditions, prior_mu, prior_std, prior_weight, model, statsmodel, use_flowthrough, use_deriv):
 
     """ log-likelihood function for difference between expected and observed values, including all priors """
 
@@ -247,9 +258,9 @@ def steady_state_log_likelihood (x, vals, var, nf, T, conditions, prior_mu, prio
             
         # get expected mean values (and their derivatives)
         if use_deriv:
-            exp_mean,exp_mean_deriv=get_steady_state_values(log_rates[i],T[i],model,use_deriv)
+            exp_mean,exp_mean_deriv=get_steady_state_values(log_rates[i],T[i],model,use_flowthrough,use_deriv)
         else:
-            exp_mean=get_steady_state_values(log_rates[i],T[i],model)
+            exp_mean=get_steady_state_values(log_rates[i],T[i],model,use_flowthrough)
 
         # add gaussian or neg. binomial log-likelihood 
         if statsmodel=='gaussian':
@@ -279,18 +290,18 @@ def steady_state_log_likelihood (x, vals, var, nf, T, conditions, prior_mu, prio
         # return negative log likelihood
         return -fun
 
-def steady_state_residuals (x, vals, nf, T, conditions, model):
+def steady_state_residuals (x, vals, nf, T, conditions, model, use_flowthrough):
 
     """ residuals between observed and expected values for each fraction separately"""
 
     nconds=len(conditions)
     log_rates=get_rates(x, nconds, model)
-    ncols=3+3*('c' in model.lower())+('d' in model.lower())
+    ncols=(2+use_flowthrough)+(2+use_flowthrough)*('c' in model.lower())+('d' in model.lower())
 
     res=np.zeros(ncols)
     # add up model residuals for each condition and each replicate
     for i in range(nconds):
-        exp_mean=get_steady_state_values(log_rates[i],T[i],model)
+        exp_mean=get_steady_state_values(log_rates[i],T[i],model,use_flowthrough)
         res+=np.sum((vals[i]*nf[i]-exp_mean)**2,axis=0)
 
     if res is np.nan:
@@ -298,16 +309,14 @@ def steady_state_residuals (x, vals, nf, T, conditions, model):
 
     return res
 
-def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model, statsmodel, min_args):
+def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model, statsmodel, use_flowthrough, min_args):
 
     """ fits a specific model to data given variance, normalization factors, labeling times, conditions, 
     priors, initial estimate from a parent model etc. """
 
     nconds=len(conditions)
     nrates=sum(nconds if mp.isupper() else 1 for mp in model)
-    ncols=3+3*('c' in model.lower())+('d' in model.lower())
-    iRNA=2
-    iribo=3+3*('c' in model.lower())
+    ncols=(2+use_flowthrough)+(2+use_flowthrough)*('c' in model.lower())+('d' in model.lower())
 
     if parent is not None:
         if model.lower()==model:
@@ -319,7 +328,7 @@ def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model
         initial_estimate=np.repeat(priors['mu'].values,nconds)
 
     # arguments to minimization
-    args=(vals, var, nf, T, conditions, priors['mu'].values, priors['std'].values, prior_weight,  model, statsmodel, min_args['jac'])
+    args=(vals, var, nf, T, conditions, priors['mu'].values, priors['std'].values, prior_weight,  model, statsmodel, use_flowthrough, min_args['jac'])
 
     # test gradient against numerical difference for debugging 
     if False:
@@ -340,7 +349,7 @@ def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model
                                 **min_args)
     
     # get sums of squares for coefficient of determination
-    SSres=steady_state_residuals(res.x,vals,nf,T,conditions,model)
+    SSres=steady_state_residuals(res.x,vals,nf,T,conditions,model,use_flowthrough)
     mean_vals=np.sum(np.sum(vals*nf,axis=0),axis=0)/np.prod(vals.shape[:2])
     SStot=np.sum(np.sum((vals*nf-mean_vals)**2,axis=0),axis=0)
 
@@ -370,8 +379,8 @@ def fit_model (vals, var, nf, T, conditions, priors, prior_weight, parent, model
         
     return result
 
-def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, min_precursor=.1, min_ribo=1, \
-             models=None, constant_genes=None, maxlevel=None, priors=None, prior_weight=1, statsmodel='nbinom'):
+def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, no_model_selection=False, min_precursor=.1, min_ribo=1, \
+             use_flowthrough=True, models=None, maxlevel=None, priors=None, prior_weight=1, statsmodel='nbinom'):
 
     """ main routine in this package: given dataframe of TPM values, variabilities, normalization factors 
     and labeling time T, estimates empirical priors and fits models of increasing complexity """
@@ -385,8 +394,12 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
     TPM=vals.multiply(NF)
 
     # these are the features to use depending on cutoffs
-    mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
-    precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+    if use_flowthrough:
+        mature_cols=['elu-mature','flowthrough-mature','unlabeled-mature']
+        precursor_cols=['elu-precursor','flowthrough-precursor','unlabeled-precursor']
+    else:
+        mature_cols=['elu-mature','unlabeled-mature']
+        precursor_cols=['elu-precursor','unlabeled-precursor']
     ribo_cols=['ribo']
 
     use_precursor=(TPM['unlabeled-precursor'] > min_precursor).any(axis=1) & ~var[precursor_cols].isnull().any(axis=1)
@@ -397,23 +410,15 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
     print >> sys.stderr, '          {0:5d} genes with mature+precursor'.format((use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '          {0:5d} genes with mature only'.format((~use_precursor & ~use_ribo).sum())
     print >> sys.stderr, '[RNAkira] {0} conditions, {1} replicates, {2} model'.format(nconds,nreps,statsmodel)
-    if model_selection=='LRT':
+    if not no_model_selection:
         print >> sys.stderr, '[RNAkira] model selection: LRT with alpha={0:.2g} and LFC>={1:.2f}'.format(alpha,LFC_cutoff)
-    elif model_selection=='empirical':
-        set_new_alpha=False
-        alpha_eff=alpha
-        if constant_genes is None:
-            raise Exception("[RNAkira] cannot use empirical FDR without constant genes!")
-        print >> sys.stderr, '[RNAkira] model selection: empirical FDR with alpha={0:.2g} and {1} constant genes'.format(alpha,len(constant_genes))
     else:
-        model_selection=None
         print >> sys.stderr, '[RNAkira] no model selection'
 
-    #min_args=dict(method='L-BFGS-B',jac=False,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
     min_args=dict(method='L-BFGS-B',jac=True,options={'disp':False, 'ftol': 1.e-15, 'gtol': 1.e-10})
 
     if models is None:
-        if model_selection is not None:
+        if not no_model_selection:
             nlevels=6 if maxlevel is None else maxlevel+1
             models=get_model_definitions(nlevels,take_all=True)
         else:
@@ -435,8 +440,14 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
         take_precursor=take_mature & use_precursor & ((TPM['unlabeled-precursor'] > TPM['unlabeled-precursor'].quantile(.5)) & \
                                                       (TPM['unlabeled-precursor'] < TPM['unlabeled-precursor'].quantile(.95))).any(axis=1)
         log_a=np.log((TPM['elu-mature']+TPM['elu-precursor']).divide(T,axis=0,level=0))[take_precursor].values.flatten()
-        log_b=np.log(np.log(1+TPM['elu-mature']/TPM['flowthrough-mature']).divide(T,axis=0,level=0))[take_mature].values.flatten()
-        log_c=np.log(np.log(1+TPM['elu-precursor']/TPM['flowthrough-precursor']).divide(T,axis=0,level=0))[take_precursor].values.flatten()
+
+        if use_flowthrough:
+            log_b=np.log(np.log(1+TPM['elu-mature']/TPM['flowthrough-mature']).divide(T,axis=0,level=0))[take_mature].values.flatten()
+            log_c=np.log(np.log(1+TPM['elu-precursor']/TPM['flowthrough-precursor']).divide(T,axis=0,level=0))[take_precursor].values.flatten()
+        else:
+            log_b=np.log(-np.log(TPM['elu-mature']/TPM['unlabeled-mature']).divide(T,axis=0,level=0))[take_mature].values.flatten()
+            log_c=np.log(-np.log(TPM['elu-precursor']/TPM['unlabeled-precursor']).divide(T,axis=0,level=0))[take_precursor].values.flatten()
+
         all_pars='abc'
         prior_msg='   est. priors for log_a: {0:.2g}/{1:.2g}, log_b: {2:.2g}/{3:.2g}, log_c: {4:.2g}/{5:.2g}'
         est_vals=[log_a,log_b,log_c]
@@ -492,7 +503,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((nconds,nreps,len(cols)))
 
             result=fit_model (vals_here, var_here, nf_here, T.loc[gene], conditions, model_priors.loc[list(model.lower())], \
-                              prior_weight, None, model, statsmodel, min_args)
+                              prior_weight, None, model, statsmodel, use_flowthrough, min_args)
 
             results[gene][level]=result
             all_results[gene][level]={model: result}
@@ -530,7 +541,8 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             model_results=dict()
             nfits=0
             # do this for each gene
-            for gene in genes[(use_ribo if 'd' in model.lower() else ~use_ribo) & (use_precursor if 'c' in model.lower() else ~use_precursor)]:
+            for gene in genes[(use_ribo if 'd' in model.lower() else ~use_ribo) &\
+                                  (use_precursor if 'c' in model.lower() else ~use_precursor)]:
 
                 cols=mature_cols[:]
                 if use_precursor[gene]:
@@ -547,7 +559,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
                     continue
 
                 # for model selection: only compute this model if the parent model was significant
-                if level > 1 and model_selection is not None and not parent['significant']:
+                if level > 1 and not no_model_selection and not parent['significant']:
                     continue
 
                 if model.isupper():
@@ -563,7 +575,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
                     var_here=var.loc[gene][cols].values
                     nf_here=NF.loc[gene].unstack(level=0)[cols].stack().values.reshape((nconds,nreps,len(cols)))
                     result=fit_model (vals_here, var_here, nf_here, T.loc[gene], conditions, model_priors.loc[list(model.lower())],\
-                                      prior_weight, parent, model, statsmodel, min_args)
+                                      prior_weight, parent, model, statsmodel, use_flowthrough, min_args)
 
                 model_results[gene]=result
                 level_results[gene][model]=result
@@ -572,25 +584,18 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
             pvals=dict((gene,v['LRT-p']) for gene,v in model_results.iteritems() if 'LRT-p' in v)
             qvals=dict(zip(pvals.keys(),p_adjust_bh(pvals.values())))
 
-            # determine empirical p-value cutoff if enough constant genes have been fit
-            if model_selection=='empirical' and level==1 and not set_new_alpha and sum(g in model_results for g in constant_genes) > .5*len(constant_genes):
-                neff=int(alpha*sum(g in model_results for g in constant_genes))
-                alpha_eff=max(sorted(model_results[g]['LRT-p'] for g in constant_genes if g in model_results)[:neff])
-                print >> sys.stderr, '   setting empirical p-value cutoff to {0:.2g}'.format(alpha_eff)
-                set_new_alpha=True
-
             # determine which models are significantly better
             nsig=0
             for gene,q in qvals.iteritems():
                 model_results[gene]['LRT-q']=q
-                if (model_selection=='LRT' and model_results[gene]['LRT-q'] <= alpha and model_results[gene]['tot_LFC'] >= LFC_cutoff) or \
-                   (model_selection=='empirical' and model_results[gene]['LRT-p'] <= alpha_eff):
+                if (not no_model_selection and model_results[gene]['LRT-q'] <= alpha and \
+                        model_results[gene]['tot_LFC'] >= LFC_cutoff):
                     model_results[gene]['significant']=True
                     nsig+=1
 
             # print status 
             message='   model: {0}, {1} fits'.format(model,nfits)
-            if model_selection is not None:
+            if not no_model_selection:
                 message +=' ({0} {2} at alpha={1:.2g} and LFC>={3:.2g})'.format(nsig,alpha,'improved' if level > 1 else 'insufficient',LFC_cutoff)
             if nfits > 0:
                 print >> sys.stderr, message
@@ -603,7 +608,7 @@ def RNAkira (vals, var, NF, T, alpha=0.05, LFC_cutoff=0, model_selection=None, m
 
     print >> sys.stderr, '[RNAkira] done'
 
-    if model_selection is not None:
+    if not no_model_selection:
         return dict((gene,rr.values()) for gene,rr in results.iteritems())
     else:
         return dict((gene,[r for lv,rr in lr.iteritems() for m,r in rr.iteritems()]) for gene,lr in all_results.iteritems())
@@ -687,7 +692,7 @@ def collect_results (results, conditions, select_best=False):
 
     return pd.DataFrame.from_dict(output,orient='index')
 
-def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_factors=False, fig_name=None):
+def normalize_elu_flowthrough (TPM, samples, balance_normalization_factors=False, fig_name=None):
 
     """ fixes library size normalization of TPM values for each sample separately """
 
@@ -700,24 +705,21 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_fa
         fig=plt.figure(figsize=(2*N,2*M))
         fig.subplots_adjust(bottom=.1,top=.95,hspace=.4,wspace=.3)
 
-    print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] normalizing by linear regression over genes'
+    print >> sys.stderr, '[normalize_elu_flowthrough] normalizing by linear regression over genes'
 
     # collect correction_factors
     CF=pd.Series(1.0,index=TPM.columns)
 
-    for n,(c,r) in enumerate(samples):
+    # select reliable genes with decent expression level in mature fractions
+    reliable_genes=(TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
-        # select reliable genes with decent expression level in mature fractions
-        reliable_genes=(TPM[['unlabeled-mature','elu-mature']].xs((c,r),axis=1,level=[1,2]) > 1).all(axis=1)
+    for n,(c,r) in enumerate(samples):
 
         elu_ratio=(TPM['elu-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
         FT_ratio=(TPM['flowthrough-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
         slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
-
-        #slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1],\
-        #                               we=elu_ratio[ok].std(),wd=FT_ratio[ok].std())
 
         if intercept <= 0 or slope >= 0:
             raise Exception('invalid slope ({0:.2g}) or intercept ({1:.2g})'.format(slope,intercept))
@@ -745,7 +747,7 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_fa
 
     if balance_normalization_factors:
 
-        print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] balancing correction factors over samples'
+        print >> sys.stderr, '[normalize_elu_flowthrough] balancing correction factors over samples'
 
         totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
         elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']
@@ -754,7 +756,7 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_fa
         slope,intercept=odr_regression(elu_ratios, flowthrough_ratios)
 
         if slope > 0 or intercept < 0:
-            raise Exception('invalid slope ({0:.2f}) or intercept ({1:.2f}) in normalize_elu_flowthrough_over_genes!'.format(slope,intercept))
+            raise Exception('invalid slope ({0:.2f}) or intercept ({1:.2f}) in normalize_elu_flowthrough!'.format(slope,intercept))
 
         CF['elu-mature']=-slope*CF['elu-mature']/intercept
         CF['elu-precursor']=-slope*CF['elu-precursor']/intercept
@@ -762,57 +764,25 @@ def normalize_elu_flowthrough_over_genes (TPM, samples, balance_normalization_fa
         CF['flowthrough-precursor']=CF['flowthrough-precursor']/intercept
 
     if fig_name is not None:
-        print >> sys.stderr, '[normalize_elu_flowthrough_over_genes] saving figure to {0}'.format(fig_name)
+        print >> sys.stderr, '[normalize_elu_flowthrough] saving figure to {0}'.format(fig_name)
         fig.savefig(fig_name)
 
     return CF
 
-def normalize_elu_flowthrough_over_samples (TPM, constant_genes, fig_name=None):
+def normalize_elu (TPM, constant_genes):
 
     """ fixes library size normalization of total TPM values using constant genes """
 
-    if fig_name is not None:
-        import matplotlib
-        matplotlib.use('Agg')
-        from matplotlib import pyplot as plt
-        fig=plt.figure(figsize=(4,3))
-
-    print >> sys.stderr, '[normalize_elu_flowthrough_over_samples] normalizing using constant genes'
+    print >> sys.stderr, '[normalize_elu] normalizing using constant genes'
 
     CF=pd.Series(1.0,index=TPM.columns)
-    # normalize TPMs to those of constant genes
-    constant_frac=TPM.loc[constant_genes][['unlabeled-mature','unlabeled-precursor']].sum(axis=0).sum(level=[1,2]).mean()
-    for col in ['elu','flowthrough','unlabeled']:
-        CF[col+'-mature']=constant_frac/TPM.loc[constant_genes][[col+'-mature',col+'-precursor']].sum(axis=0).sum(level=[1,2])
-        CF[col+'-precursor']=constant_frac/TPM.loc[constant_genes][[col+'-mature',col+'-precursor']].sum(axis=0).sum(level=[1,2])
-    TPM1=TPM.multiply(CF,axis=1)
 
-    slope,intercept=odr_regression(TPM1['elu-mature'].sum(axis=0)/TPM1['unlabeled-mature'].sum(axis=0),\
-                                   TPM1['flowthrough-mature'].sum(axis=0)/TPM1['unlabeled-mature'].sum(axis=0))
+    # normalize elu TPMs to those of constant genes
+    cTPM=TPM.loc[constant_genes].sum(axis=0)
+    elu_ratios=cTPM['elu-mature']/cTPM['unlabeled-mature']
 
-    if slope > 0 or intercept < 0:
-        raise Exception('invalid slope ({0:.2f}) or intercept ({1:.2f}) in normalize_elu_flowthrough_over_samples!'.format(slope,intercept))
-
-    CF['elu-mature'] = -slope*CF['elu-mature']/intercept
-    CF['elu-precursor'] = -slope*CF['elu-precursor']/intercept
-    CF['flowthrough-mature'] = CF['flowthrough-mature']/intercept
-    CF['flowthrough-precursor'] = CF['flowthrough-precursor']/intercept
-
-    if fig_name is not None:
-
-        ax=fig.add_axes([.15,.15,.8,.75])
-        for col in TPM['unlabeled-mature'].columns.get_level_values(0).unique():
-            ax.plot(TPM1['elu-mature',col].sum(axis=0)/TPM1['unlabeled-mature',col].sum(axis=0),\
-                    TPM1['flowthrough-mature',col].sum(axis=0)/TPM1['unlabeled-mature',col].sum(axis=0),'o',label=col)
-        xlim=ax.get_xlim()
-        ax.plot(np.linspace(xlim[0],xlim[1],20),intercept+slope*np.linspace(xlim[0],xlim[1],20),'k--')
-        ax.set_xlabel('elu/total')
-        ax.set_ylabel('flowthrough/total')
-        ax.legend()
-        ax.set_title('normalizing using constant genes',size=10)
-
-        print >> sys.stderr, '[normalize_elu_flowthrough_over_samples] saving figure to {0}'.format(fig_name)
-        fig.savefig(fig_name)
+    CF['elu-mature']=elu_ratios.mean()/elu_ratios
+    CF['elu-precursor']=elu_ratios.mean()/elu_ratios
 
     return CF
 
@@ -1023,17 +993,16 @@ if __name__ == '__main__':
     parser.add_option('-o','--out_prefix',dest='out_prefix',default='RNAkira_',help="output prefix [RNAkira]")
     parser.add_option('','--alpha',dest='alpha',help="model selection cutoff [0.05]",default=0.05,type=float)
     parser.add_option('','--LFC_cutoff',dest='LFC_cutoff',help="model selection LFC cutoff [0]",default=0,type=float)
-    parser.add_option('','--model_selection',dest='model_selection',help="model selection (using LRT or empirical)")
-    parser.add_option('','--constant_genes',dest='constant_genes',help="list of constant genes for empirical FDR calculcation")
     parser.add_option('','--maxlevel',dest='maxlevel',help="max level to test [5]",default=5,type=int)
     parser.add_option('','--min_mature',dest='min_mature',help="min TPM for mature [1]",default=1,type=float)
     parser.add_option('','--min_precursor',dest='min_precursor',help="min TPM for precursor [.1]",default=.1,type=float)
     parser.add_option('','--min_ribo',dest='min_ribo',help="min TPM for ribo [1]",default=1,type=float)
     parser.add_option('','--weight',dest='weight',help="weighting parameter for dispersion estimation [1]",default=1.,type=float)
     parser.add_option('','--no_plots',dest='no_plots',help="don't create plots for U-bias correction and normalization",action='store_false')
+    parser.add_option('','--no_model_selection',dest='no_model_selection',action='store_true',default=False,help="no model selection")
     parser.add_option('','--save_normalization_factors',dest='save_normalization_factors',action='store_true',default=False,help="""save normalization factors from elu/flowthrough regression [no]""")
     parser.add_option('','--save_variability',dest='save_variability',action='store_true',default=False,help="""save variability estimates [no]""")
-    parser.add_option('','--normalize_over_samples',dest='normalize_over_samples',action='store_true',default=False,help="""normalize elu vs. flowthrough over samples using constant genes""")
+    parser.add_option('','--normalize_with_constant_genes',dest='normalize_with_constant_genes',help="""normalize elu using constant genes (provide a list)""")
     parser.add_option('','--save_TPM',dest='save_TPM',action='store_true',default=False,help="""save TPM values [no]""")
     parser.add_option('','--statsmodel',dest='statsmodel',help="statistical model to use (gaussian or nbinom) [nbinom]",default='nbinom')
     parser.add_option('','--prior_weight',dest='prior_weight',help="prior weight in log likelihood [1]",default=1,type=float)
@@ -1083,17 +1052,28 @@ if __name__ == '__main__':
         print >> sys.stderr, '   elu-exons:\t\t'+options.elu_exons
         elu_exons,elu_exon_length=read_featureCounts_output(options.elu_exons,samples)
 
-        print >> sys.stderr, '   flowthrough-introns:\t'+options.flowthrough_introns
-        flowthrough_introns,flowthrough_intron_length=read_featureCounts_output(options.flowthrough_introns,samples)
-
-        print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
-        flowthrough_exons,flowthrough_exon_length=read_featureCounts_output(options.flowthrough_exons,samples)
-
         print >> sys.stderr, '   unlabeled-introns:\t'+options.unlabeled_introns
         unlabeled_introns,unlabeled_intron_length=read_featureCounts_output(options.unlabeled_introns,samples)
 
         print >> sys.stderr, '   unlabeled-exons:\t'+options.unlabeled_exons
         unlabeled_exons,unlabeled_exon_length=read_featureCounts_output(options.unlabeled_exons,samples)
+
+        if options.flowthrough_introns is not None:
+            print >> sys.stderr, '   flowthrough-introns:\t'+options.flowthrough_introns
+            flowthrough_introns,flowthrough_intron_length=read_featureCounts_output(options.flowthrough_introns,samples)
+        else:
+            print >> sys.stderr, '   flowthrough-introns:\t\tno values given!'
+            flowthrough_introns=pd.DataFrame(np.nan,index=unlabeled_introns.index,columns=unlabeled_introns.columns)
+            flowthrough_intron_length=pd.Series(1,index=unlabeled_intron_length.index)
+
+        if options.flowthrough_exons is not None:
+            print >> sys.stderr, '   flowthrough-exons:\t'+options.flowthrough_exons
+            flowthrough_exons,flowthrough_exon_length=read_featureCounts_output(options.flowthrough_exons,samples)
+        else:
+            use_flowthrough=False
+            print >> sys.stderr, '   flowthrough-exons:\t\tno values given!'
+            flowthrough_exons=pd.DataFrame(np.nan,index=unlabeled_exons.index,columns=unlabeled_exons.columns)
+            flowthrough_exon_length=pd.Series(1,index=unlabeled_exon_length.index)
 
         if options.ribo is not None:
             print >> sys.stderr, '   ribo:\t\t'+options.ribo
@@ -1140,9 +1120,9 @@ if __name__ == '__main__':
             TPM.to_csv(options.out_prefix+'TPM.csv',\
                        header=['.'.join(col) for col in TPM.columns],tupleize_cols=True)
 
-    if options.model_selection=='empirical' or options.normalize_over_samples:
-        constant_genes=[line.split()[0] for line in open(options.constant_genes)]
-        print >> sys.stderr, '[main] using {0} constant genes from {1}'.format(len(constant_genes),options.constant_genes)
+    if not use_flowthrough or options.normalize_with_constant_genes:
+        constant_genes=[line.split()[0] for line in open(options.normalize_with_constant_genes)]
+        print >> sys.stderr, '[main] using {0} constant genes from {1}'.format(len(constant_genes),options.normalize_with_constant_genes)
     else:
         constant_genes=None
 
@@ -1152,11 +1132,10 @@ if __name__ == '__main__':
     UF=correct_ubias(TPM,samples,gene_stats,fig_name=(None if options.no_plots else options.out_prefix+'ubias_correction.pdf'))
 
     print >> sys.stderr, '\n[main] normalizing TPMs'
-    if options.normalize_over_samples:
-        CF=normalize_elu_flowthrough_over_samples (TPM.multiply(UF), constant_genes,\
-                                                   fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
+    if not use_flowthrough or options.normalize_with_constant_genes:
+        CF=normalize_elu (TPM.multiply(UF), constant_genes)
     else:
-        CF=normalize_elu_flowthrough_over_genes (TPM.multiply(UF), samples,\
+        CF=normalize_elu_flowthrough (TPM.multiply(UF), samples,\
                                                  balance_normalization_factors=options.balance_normalization_factors,\
                                                  fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
 
@@ -1184,8 +1163,11 @@ if __name__ == '__main__':
         variability.to_csv(options.out_prefix+'variability.csv')
 
     # select genes based on TPM cutoffs for mature in any of the conditions
-    take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) & \
-        ~variability[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
+    take=(TPM['unlabeled-mature'] > options.min_mature).any(axis=1) & ~np.in1d(TPM.index,constant_genes)
+    if use_flowthrough:
+        take=take & ~variability[['unlabeled-mature','elu-mature','flowthrough-mature']].isnull().any(axis=1)
+    else:
+        take=take & ~variability[['unlabeled-mature','elu-mature']].isnull().any(axis=1)
 
     try:
         T=map(float,options.T.split(','))
@@ -1207,16 +1189,16 @@ if __name__ == '__main__':
     print >> sys.stderr, '\n[main] running RNAkira'
     results=RNAkira(counts[take], variability[take], NF[take], T[take], \
                     alpha=options.alpha, LFC_cutoff=options.LFC_cutoff,\
-                    model_selection=options.model_selection, \
-                    constant_genes=np.intersect1d(constant_genes,TPM[take].index),\
+                    no_model_selection=options.no_model_selection, \
                     min_precursor=options.min_precursor, \
                     min_ribo=options.min_ribo,\
+                    use_flowthrough=use_flowthrough,\
                     maxlevel=options.maxlevel, \
                     prior_weight=options.prior_weight, \
                     statsmodel=options.statsmodel)
 
     print >> sys.stderr, '[main] collecting output'
-    output=collect_results(results, conditions, select_best=(options.model_selection is not None))
+    output=collect_results(results, conditions, select_best=not options.no_model_selection)
 
     print >> sys.stderr, '       writing results to {0}'.format(options.out_prefix+'results.csv')
     output.to_csv(options.out_prefix+'results.csv')
