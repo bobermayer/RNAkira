@@ -777,8 +777,11 @@ def normalize_elu (TPM, constant_genes):
 
     CF=pd.Series(1.0,index=TPM.columns)
 
+    # select reliable genes with decent expression level in mature fractions
+    reliable_genes=(TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
+
     # normalize elu TPMs to those of constant genes
-    cTPM=TPM.loc[constant_genes].sum(axis=0)
+    cTPM=TPM.loc[constant_genes].sum(axis=0)/TMP.loc[reliable_genes].sum(axis=0)
     elu_ratios=cTPM['elu-mature']/cTPM['unlabeled-mature']
 
     CF['elu-mature']=elu_ratios.mean()/elu_ratios
