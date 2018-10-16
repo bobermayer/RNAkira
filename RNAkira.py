@@ -692,7 +692,7 @@ def collect_results (results, conditions, select_best=False):
 
     return pd.DataFrame.from_dict(output,orient='index')
 
-def normalize_elu_flowthrough (TPM, samples, balance_normalization_factors=False, fig_name=None):
+def normalize_elu_flowthrough (TPM, samples, gene_stats, balance_normalization_factors=False, fig_name=None):
 
     """ fixes library size normalization of TPM values for each sample separately """
 
@@ -710,13 +710,15 @@ def normalize_elu_flowthrough (TPM, samples, balance_normalization_factors=False
     # collect correction_factors
     CF=pd.Series(1.0,index=TPM.columns)
 
-    # select reliable genes with decent expression level in mature fractions
-    reliable_genes=(TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
     for n,(c,r) in enumerate(samples):
 
         elu_ratio=(TPM['elu-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
         FT_ratio=(TPM['flowthrough-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
+
+        # select protein-coding genes with decent expression level in mature fractions
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \ 
+           (TPM[['unlabeled-mature','elu-mature']].xs((c,r),axis=1,level=[1,2]) > 1).all(axis=1)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
         slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
@@ -749,6 +751,9 @@ def normalize_elu_flowthrough (TPM, samples, balance_normalization_factors=False
 
         print >> sys.stderr, '[normalize_elu_flowthrough] balancing correction factors over samples'
 
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+            (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
+
         totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
         elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']
         flowthrough_ratios=totTPM['flowthrough-mature']/totTPM['unlabeled-mature']
@@ -769,7 +774,7 @@ def normalize_elu_flowthrough (TPM, samples, balance_normalization_factors=False
 
     return CF
 
-def normalize_elu (TPM, constant_genes):
+def normalize_elu (TPM, gene_stats, constant_genes):
 
     """ fixes library size normalization of total TPM values using constant genes """
 
@@ -778,7 +783,9 @@ def normalize_elu (TPM, constant_genes):
     CF=pd.Series(1.0,index=TPM.columns)
 
     # select reliable genes with decent expression level in mature fractions
-    reliable_genes=(TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
+    # select protein-coding genes with decent expression level in mature fractions
+    reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+        (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
     # normalize elu TPMs to those of constant genes
     cTPM=TPM.loc[constant_genes].sum(axis=0)/TMP.loc[reliable_genes].sum(axis=0)
@@ -1137,9 +1144,9 @@ if __name__ == '__main__':
 
     print >> sys.stderr, '\n[main] normalizing TPMs'
     if not use_flowthrough or options.normalize_with_constant_genes:
-        CF=normalize_elu (TPM.multiply(UF), constant_genes)
+        CF=normalize_elu (TPM.multiply(UF), gene_stats, constant_genes)
     else:
-        CF=normalize_elu_flowthrough (TPM.multiply(UF), samples,\
+        CF=normalize_elu_flowthrough (TPM.multiply(UF), samples, gene_stats,\
                                                  balance_normalization_factors=options.balance_normalization_factors,\
                                                  fig_name=(None if options.no_plots else options.out_prefix+'normalization.pdf'))
 
