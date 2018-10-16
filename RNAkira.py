@@ -717,7 +717,7 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, balance_normalization_f
         FT_ratio=(TPM['flowthrough-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
 
         # select protein-coding genes with decent expression level in mature fractions
-        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \ 
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
            (TPM[['unlabeled-mature','elu-mature']].xs((c,r),axis=1,level=[1,2]) > 1).all(axis=1)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
