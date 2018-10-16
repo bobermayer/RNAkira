@@ -788,7 +788,7 @@ def normalize_elu (TPM, gene_stats, constant_genes):
         (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
     # normalize elu TPMs to those of constant genes
-    cTPM=TPM.loc[constant_genes].sum(axis=0)/TMP.loc[reliable_genes].sum(axis=0)
+    cTPM=TPM.loc[constant_genes].sum(axis=0)/TPM.loc[reliable_genes].sum(axis=0)
     elu_ratios=cTPM['elu-mature']/cTPM['unlabeled-mature']
 
     CF['elu-mature']=elu_ratios.mean()/elu_ratios
