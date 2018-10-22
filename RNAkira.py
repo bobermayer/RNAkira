@@ -717,8 +717,8 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, balance_normalization_f
         FT_ratio=(TPM['flowthrough-mature',c,r]/TPM['unlabeled-mature',c,r]).replace([np.inf,-np.inf],np.nan)
 
         # select protein-coding genes with decent expression level in mature fractions
-        #reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
-        reliable_genes=(TPM[['unlabeled-mature','elu-mature']].xs((c,r),axis=1,level=[1,2]) > 1).all(axis=1)
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+            (TPM[['unlabeled-mature','elu-mature']].xs((c,r),axis=1,level=[1,2]) > 1).all(axis=1)
 
         ok=np.isfinite(elu_ratio) & np.isfinite(FT_ratio) & reliable_genes
         slope,intercept=odr_regression(elu_ratio[ok],FT_ratio[ok],[-1,1])
@@ -751,8 +751,8 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, balance_normalization_f
 
         print >> sys.stderr, '[normalize_elu_flowthrough] balancing correction factors over samples'
 
-        #reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
-        #    (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
+        reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
+            (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
         totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
         elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']

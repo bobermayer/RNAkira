@@ -246,6 +246,11 @@ for ng,gene in enumerate(genes):
     # use this to fit models directly and abort after one gene
     if options.do_direct_fits:
 
+        use_flowthrough=not options.no_flowthrough
+
+        if options.no_flowthrough:
+            cols_here=[c for c in cols_here if 'flowthrough' not in c]
+
         vals_here=cnts.unstack(level=0)[cols_here].stack().values.reshape((len(conditions),nreps,len(cols_here)))
         std_here=std.mean(level=0)[cols_here].values
         disp_here=dsp.mean(level=0)[cols_here].values
@@ -260,32 +265,32 @@ for ng,gene in enumerate(genes):
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','gaussian',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','gaussian',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','gaussian',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','gaussian',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','gaussian',use_flowthrough,min_args)
+                res['abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','gaussian',use_flowthrough,min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','gaussian',use_flowthrough,min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','gaussian',use_flowthrough,min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','gaussian',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','gaussian',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','gaussian',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','gaussian',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','gaussian',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','gaussian',use_flowthrough,min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','gaussian',use_flowthrough,min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','gaussian',use_flowthrough,min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','gaussian',use_flowthrough,min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,std_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','gaussian',use_flowthrough,min_args)
         else:
             res={}
             if options.no_ribo:
                 priors=true_priors.loc[list('abc')]
-                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','nbinom',min_args)
-                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','nbinom',min_args)
-                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','nbinom',min_args)
-                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','nbinom',min_args)
+                res['ABC']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABC','nbinom',use_flowthrough,min_args)
+                res['abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABC'],'abc','nbinom',use_flowthrough,min_args)
+                res['Abc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abc'],'Abc','nbinom',use_flowthrough,min_args)
+                res['ABc']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abc'],'ABc','nbinom',use_flowthrough,min_args)
             else:
                 priors=true_priors.loc[list('abcd')]
-                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','nbinom',min_args)
-                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','nbinom',min_args)
-                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','nbinom',min_args)
-                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','nbinom',min_args)
-                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','nbinom',min_args)
+                res['ABCD']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,None,'ABCD','nbinom',use_flowthrough,min_args)
+                res['abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABCD'],'abcd','nbinom',use_flowthrough,min_args)
+                res['Abcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['abcd'],'Abcd','nbinom',use_flowthrough,min_args)
+                res['ABcd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['Abcd'],'ABcd','nbinom',use_flowthrough,min_args)
+                res['ABCd']=RNAkira.fit_model(vals_here,disp_here,nf_here,T.loc[gene],conditions,priors,options.prior_weight,res['ABcd'],'ABCd','nbinom',use_flowthrough,min_args)
 
         raise Exception('stop')
 
