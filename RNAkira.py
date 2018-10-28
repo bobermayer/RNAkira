@@ -754,19 +754,16 @@ def normalize_elu_flowthrough (TPM, samples, gene_stats, balance_normalization_f
         reliable_genes=(gene_stats['gene_type']=='protein_coding') & \
             (TPM[['unlabeled-mature','elu-mature']] > 1).all(axis=1)
 
-        totTPM=TPM.multiply(CF).loc[reliable_genes].sum(axis=0)
-        elu_ratios=totTPM['elu-mature']/totTPM['unlabeled-mature']
-        flowthrough_ratios=totTPM['flowthrough-mature']/totTPM['unlabeled-mature']
+        newTPM=TPM.multiply(CF)
 
-        slope,intercept=odr_regression(elu_ratios, flowthrough_ratios)
+        elu_ratios=newTPM['elu-mature'].divide(newTPM['unlabeled-mature'],axis=0).loc[reliable_genes].mean(axis=0)
+        flowthrough_ratios=newTPM['flowthrough-mature'].divide(newTPM['unlabeled-mature'],axis=0).loc[reliable_genes].mean(axis=0)
 
-        if slope > 0 or intercept < 0:
-            raise Exception('invalid slope ({0:.2f}) or intercept ({1:.2f}) in normalize_elu_flowthrough!'.format(slope,intercept))
+        CF['elu-mature']=CF['elu-mature'].divide(elu_ratios/elu_ratios.mean())
+        CF['elu-precursor']=CF['elu-precursor'].divide(elu_ratios/elu_ratios.mean())
 
-        CF['elu-mature']=-slope*CF['elu-mature']/intercept
-        CF['elu-precursor']=-slope*CF['elu-precursor']/intercept
-        CF['flowthrough-mature']=CF['flowthrough-mature']/intercept
-        CF['flowthrough-precursor']=CF['flowthrough-precursor']/intercept
+        CF['flowthrough-mature']=CF['flowthrough-mature'].divide(flowthrough_ratios/flowthrough_ratios.mean())
+        CF['flowthrough-precursor']=CF['flowthrough-precursor'].divide(flowthrough_ratios/flowthrough_ratios.mean())
 
     if fig_name is not None:
         print >> sys.stderr, '[normalize_elu_flowthrough] saving figure to {0}'.format(fig_name)
